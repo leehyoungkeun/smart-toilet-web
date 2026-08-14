@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>스마트 화장실 운영 콘솔</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:#EEF1F6; color:#1B2540; }
+  .header { background:linear-gradient(90deg,#15408F,#2C6CD0); color:#fff; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; }
+  .header .t { font-size:19px; font-weight:700; cursor:pointer; }
+  .header .r { display:flex; align-items:center; gap:12px; font-size:14px; }
+  .btn { border:0; border-radius:9px; padding:9px 15px; font-weight:600; font-size:14px; cursor:pointer; background:#4353E0; color:#fff; }
+  .btn.ghost { background:rgba(255,255,255,.16); color:#fff; }
+  .btn.line { background:#fff; color:#4353E0; border:1px solid #D6DCEC; }
+  .btn.sm { padding:6px 12px; font-size:13px; }
+  .wrap { max-width:1560px; margin:0 auto; padding:14px; }
+  .login { max-width:400px; margin:8vh auto; background:#fff; border:1px solid #E5E9F2; border-radius:18px; padding:32px; }
+  .login h1 { font-size:22px; margin:0 0 4px; } .login p { color:#6B7A95; font-size:14px; margin:0 0 20px; }
+  input,select,textarea { border:1px solid #DCE2EE; border-radius:9px; padding:9px 12px; font-size:14px; font-family:inherit; background:#fff; }
+  textarea { width:100%; min-height:160px; white-space:pre; }
+  .err { color:#E0322F; font-size:14px; margin:6px 0; } .ok { color:#138A55; font-size:14px; margin:6px 0; }
+  .muted { color:#8A94A9; }
+  code { background:#EEF1FA; padding:2px 6px; border-radius:6px; font-size:13px; }
+
+  /* 필터 카드 */
+  .fcard { background:#fff; border:1px solid #E5E9F2; border-radius:12px; overflow:hidden; margin-bottom:10px; }
+  .fhead { background:#3C4761; color:#fff; font-weight:700; font-size:14px; padding:8px 16px; }
+  .frow { display:flex; align-items:center; gap:7px; padding:6px 16px; border-bottom:1px solid #F0F2F7; flex-wrap:wrap; }
+  .frow:last-child { border-bottom:0; }
+  .flabel { width:84px; color:#5C6B86; font-size:13px; font-weight:600; flex-shrink:0; }
+  .chip { border:1px solid #DCE2EE; background:#fff; color:#48536B; border-radius:7px; padding:5px 11px; font-size:13px; font-weight:600; cursor:pointer; }
+  .chip.on { background:#4353E0; color:#fff; border-color:#4353E0; }
+  .chip .c { opacity:.7; font-weight:500; }
+  .factions { display:flex; justify-content:center; gap:10px; padding:9px; background:#FAFBFD; }
+
+  /* 통계 카드 */
+  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:10px; }
+  .stat { background:#fff; border:1px solid #E5E9F2; border-radius:12px; padding:11px 16px; display:flex; align-items:center; gap:12px; }
+  .stat .ic { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:19px; }
+  .stat .v { font-size:23px; font-weight:800; line-height:1; }
+  .stat .l { font-size:12px; color:#7A869C; margin-top:3px; }
+
+  /* 표 */
+  .tcard { background:#fff; border:1px solid #E7EBF3; border-radius:16px; overflow:hidden; box-shadow:0 1px 3px rgba(20,40,80,.04); }
+  .tbar { display:flex; align-items:center; justify-content:space-between; padding:9px 16px; border-bottom:1px solid #F0F2F7; }
+  .tbar h2 { font-size:15px; margin:0; } .tbar .tools { display:flex; gap:8px; align-items:center; }
+  .tscroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13px; min-width:820px; }
+  th,td { text-align:left; padding:9px 11px; border-bottom:1px solid #F2F4F9; white-space:nowrap; }
+  th { background:#FafBfD; color:#8A94A9; font-weight:600; font-size:11.5px; letter-spacing:.4px; }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr:hover td { background:#F6F9FE; }
+  .nowrap { white-space:nowrap; }
+  .stars { color:#F5A623; letter-spacing:1px; } .star-off { color:#E1E6EF; }
+  .lnk { color:#3B5BDB; font-weight:600; cursor:pointer; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .on{background:#22A667;} .off{background:#D25151;}
+  .badge { border-radius:999px; padding:3px 11px; font-size:12px; font-weight:600; display:inline-block; }
+  .b-g{background:#E4F6EC;color:#138A55;} .b-a{background:#FCEFD6;color:#B5730A;} .b-x{background:#EDEFF4;color:#69748C;}
+  .b-r{background:#FBE3E3;color:#C42B28;} .b-b{background:#E3EDFB;color:#2C6CD0;}
+  .pager { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; }
+  .pager .pg { display:flex; gap:6px; align-items:center; }
+  /* 모달 */
+  .backdrop { position:fixed; inset:0; background:rgba(20,30,55,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .modal { background:#fff; border-radius:16px; width:520px; max-width:92%; max-height:88vh; overflow:auto; padding:24px; }
+  .kv { display:grid; grid-template-columns:120px 1fr; gap:8px 12px; font-size:14px; margin-top:12px; }
+  .kv .k { color:#7A869C; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tab { padding:8px 16px; border-radius:9px; background:#fff; border:1px solid #DCE2EE; cursor:pointer; font-weight:600; font-size:14px; }
+  .tab.active { background:#4353E0; color:#fff; border-color:#4353E0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label.f { font-size:13px; color:#6B7A95; display:block; margin-bottom:4px; }
+  .card.pad { background:#fff; border:1px solid #E5E9F2; border-radius:14px; padding:22px; }
+  .card.pad input, .card.pad select, .login input { width:100%; margin-bottom:2px; }
+  .dbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .dbar h2 { margin:0; font-size:19px; }
+  .tabs2 { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; background:#fff; padding:6px; border:1px solid #E7EBF3; border-radius:14px; box-shadow:0 1px 3px rgba(20,40,80,.04); }
+  .tab2 { padding:9px 18px; font-size:14px; font-weight:600; color:#5C6B86; cursor:pointer; border-radius:10px; transition:all .12s; }
+  .tab2:hover { background:#F3F6FC; }
+  .tab2.on { color:#fff; background:linear-gradient(90deg,#2C6CD0,#4353E0); box-shadow:0 3px 8px rgba(44,108,208,.28); }
+  .rbar { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+  .chip.sm { padding:5px 12px; font-size:13px; }
+  .ov { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+  .frow input[type=date] { width:150px; }
+  .frow #region, .frow #sigungu { width:170px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createClient } from './supabase.js';
+const SUPABASE_URL='https://jrcvrlyvkdoxtjlhmapm.supabase.co';
+const SUPABASE_KEY='sb_publishable_JD6Mcz3_Hk2N5jX0zauvLg_pGihCjYn';
+const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
+const app=document.getElementById('app');
+const state={ role:null, profile:{}, orgs:[], locs:[], filters:{}, page:1, pageSize:20 };
+const ROLE_LABEL={platform_admin:'플랫폼 관리자(전체)',org_admin:'지자체 관리자',operator:'운영자'};
+const STATUS={active:{l:'운영중',c:'b-g'},maintenance:{l:'점검중',c:'b-a'},inactive:{l:'중지',c:'b-x'}};
+const canAdd=()=>state.role==='platform_admin'||state.role==='org_admin';
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+async function rpc(fn,body){const{data,error}=await supabase.rpc(fn,body||{});if(error)throw error;return data;}
+function download(name,text){const b=new Blob([text],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
+function fmtDate(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${n.getFullYear()}. ${p(n.getMonth()+1)}. ${p(n.getDate())}`;}catch{return'';}}
+function fmtDt(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${p(n.getMonth()+1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;}catch{return'-';}}
+function defFilters(){return{q:'',region:'',sigungu:'',status:'',online:'',stock:'',maint:'',from:null,to:null};}
+function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
+  const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
+  const days=Math.round((due-t)/86400000);
+  if(days<0) return {txt:'만료',cls:'b-r',state:'expired'};
+  if(days<=30) return {txt:days+'일',cls:'b-a',state:'soon'};
+  return {txt:days+'일',cls:'b-g',state:'ok'}; }
+
+// ── 로그인 ──
+function renderLogin(msg){
+  app.innerHTML=`<div class="login"><h1>운영 콘솔 로그인</h1><p>지자체·단체 계정으로 로그인하면 담당 화장실만 표시됩니다.</p>
+    <input id="email" type="email" placeholder="이메일" style="width:100%;margin-bottom:12px" autocomplete="username"/>
+    <input id="pw" type="password" placeholder="비밀번호" style="width:100%;margin-bottom:12px" autocomplete="current-password"/>
+    ${msg?`<div class="err">${esc(msg)}</div>`:''}<button class="btn" id="go" style="width:100%;padding:13px">로그인</button></div>`;
+  document.getElementById('go').onclick=async()=>{
+    const{error}=await supabase.auth.signInWithPassword({email:email.value.trim(),password:pw.value});
+    if(error)return renderLogin('로그인 실패: 이메일/비밀번호를 확인하세요.'); boot();
+  };
+}
+function shell(){
+  return `<div class="header"><div class="t" id="home">🚻 스마트 화장실 운영 콘솔</div>
+    <div class="r"><span class="muted" style="color:#dfe6f5">${esc((state.profile.full_name?state.profile.full_name+' · ':'')+(ROLE_LABEL[state.role]||'권한 없음'))}</span>
+    <button class="btn ghost sm" id="logout">로그아웃</button></div></div><div class="wrap" id="body"></div>`;
+}
+function mountShell(){app.innerHTML=shell();document.getElementById('home').onclick=renderDashboard;
+  document.getElementById('logout').onclick=async()=>{await supabase.auth.signOut();renderLogin();};}
+
+// ── 대시보드 ──
+async function renderDashboard(){
+  mountShell(); state.filters=defFilters(); state.page=1;
+  const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
+  try{ state.locs=await rpc('fleet_locations'); }catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  body.innerHTML=`<div id="filters"></div><div id="stats"></div><div id="table"></div>`;
+  renderFilters(); renderAll();
+}
+function regions(){ return [...new Set(state.locs.filter(l=>!l.deleted).map(l=>l.sido).filter(Boolean))].sort(); }
+function sigungus(sido){ return [...new Set(state.locs.filter(l=>!l.deleted&&(!sido||l.sido===sido)).map(l=>l.sigungu).filter(Boolean))].sort(); }
+function count(pred){ return state.locs.filter(pred).length; }
+
+function renderFilters(){
+  const f=state.filters;
+  const chip=(field,val,label,n)=>`<button class="chip ${f[field]===val?'on':''}" data-f="${field}" data-v="${val}">${label}${n!=null?` <span class="c">(${n})</span>`:''}</button>`;
+  document.getElementById('filters').innerHTML=`<div class="fcard">
+    <div class="fhead">화장실 검색</div>
+    <div class="frow"><div class="flabel">검색어</div>
+      <input id="q" placeholder="코드·이름·지역 검색" style="flex:1;min-width:220px" value="${esc(f.q)}"/></div>
+    <div class="frow"><div class="flabel">지역</div>
+      <select id="region"><option value="">전체 광역</option>${regions().map(r=>`<option ${f.region===r?'selected':''}>${esc(r)}</option>`).join('')}</select>
+      <select id="sigungu"><option value="">전체 기초</option>${sigungus(f.region).map(r=>`<option ${f.sigungu===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
+    <div class="frow"><div class="flabel">화장실 상태</div>
+      ${chip('status','','전체')}${chip('status','active','운영중',count(l=>!l.deleted&&l.status==='active'))}${chip('status','maintenance','점검중',count(l=>!l.deleted&&l.status==='maintenance'))}${chip('status','inactive','중지',count(l=>!l.deleted&&l.status==='inactive'))}${chip('status','deleted','삭제됨',count(l=>l.deleted))}</div>
+    <div class="frow"><div class="flabel">접속 상태</div>
+      ${chip('online','','전체')}${chip('online','on','온라인',count(l=>!l.deleted&&l.online))}${chip('online','off','오프라인',count(l=>!l.deleted&&!l.online))}</div>
+    <div class="frow"><div class="flabel">재고</div>
+      ${chip('stock','','전체')}${chip('stock','ok','정상',count(l=>!l.deleted&&l.pad_qty>10))}${chip('stock','low','부족',count(l=>!l.deleted&&l.pad_qty!=null&&l.pad_qty<=10))}</div>
+    <div class="frow"><div class="flabel">유지보수</div>
+      ${chip('maint','','전체')}${chip('maint','ok','정상',count(l=>!l.deleted&&maintInfo(l).state==='ok'))}${chip('maint','soon','만료임박',count(l=>!l.deleted&&maintInfo(l).state==='soon'))}${chip('maint','expired','만료',count(l=>!l.deleted&&maintInfo(l).state==='expired'))}</div>
+    <div class="frow"><div class="flabel">등록기간</div>
+      <button class="chip" data-p="1">오늘</button><button class="chip" data-p="7">7일</button><button class="chip" data-p="30">1개월</button><button class="chip" data-p="90">3개월</button><button class="chip" data-p="365">1년</button>
+      <input id="from" type="date" value="${f.from?f.from.toISOString().slice(0,10):''}"/> ~ <input id="to" type="date" value="${f.to?f.to.toISOString().slice(0,10):''}"/></div>
+    <div class="factions"><button class="btn line" id="reset">초기화</button><button class="btn" id="search">검색</button></div>
+  </div>`;
+  const fl=document.getElementById('filters');
+  fl.querySelectorAll('.chip[data-f]').forEach(b=>b.onclick=()=>{ f[b.dataset.f]=b.dataset.v; state.page=1; renderFilters(); renderAll(); });
+  fl.querySelectorAll('.chip[data-p]').forEach(b=>b.onclick=()=>{ const d=+b.dataset.p; f.to=new Date(); f.from=new Date(Date.now()-d*86400000); state.page=1; renderFilters(); renderAll(); });
+  document.getElementById('search').onclick=()=>{ f.q=document.getElementById('q').value.trim(); f.region=document.getElementById('region').value;
+    const fr=document.getElementById('from').value, to=document.getElementById('to').value; f.from=fr?new Date(fr):null; f.to=to?new Date(to+'T23:59:59'):null; state.page=1; renderFilters(); renderAll(); };
+  document.getElementById('reset').onclick=()=>{ state.filters=defFilters(); state.page=1; renderFilters(); renderAll(); };
+  document.getElementById('region').onchange=e=>{ f.region=e.target.value; f.sigungu=''; state.page=1; renderFilters(); renderAll(); };
+  document.getElementById('sigungu').onchange=e=>{ f.sigungu=e.target.value; state.page=1; renderAll(); };
+  document.getElementById('q').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('search').click(); });
+}
+
+function applyFilters(){
+  const f=state.filters;
+  return state.locs.filter(l=>{
+    if(f.status==='deleted'){ if(!l.deleted) return false; }
+    else { if(l.deleted) return false; if(f.status && l.status!==f.status) return false; }
+    if(f.q){ const s=(l.code+' '+l.name+' '+(l.org_name||'')+' '+(l.sigungu||'')+' '+(l.sido||'')).toLowerCase(); if(!s.includes(f.q.toLowerCase())) return false; }
+    if(f.region && l.sido!==f.region) return false;
+    if(f.sigungu && l.sigungu!==f.sigungu) return false;
+    if(f.online==='on' && !l.online) return false;
+    if(f.online==='off' && l.online) return false;
+    if(f.stock==='ok' && !(l.pad_qty>10)) return false;
+    if(f.stock==='low' && !(l.pad_qty!=null&&l.pad_qty<=10)) return false;
+    if(f.maint && maintInfo(l).state!==f.maint) return false;
+    if(f.from && new Date(l.created_at)<f.from) return false;
+    if(f.to && new Date(l.created_at)>f.to) return false;
+    return true;
+  });
+}
+function renderAll(){ renderStats(); renderTable(); }
+
+function renderStats(){
+  const L=state.locs.filter(l=>!l.deleted);
+  const off=L.filter(l=>!l.online).length, low=L.filter(l=>l.pad_qty!=null&&l.pad_qty<=10).length;
+  const comp=L.reduce((a,l)=>a+(l.open_complaints||0),0);
+  const soon=L.filter(l=>maintInfo(l).state==='soon'||maintInfo(l).state==='expired').length;
+  const ok=L.filter(l=>l.online&&l.pad_qty>10&&(l.open_complaints||0)===0).length;
+  const card=(bg,fg,ic,v,l)=>`<div class="stat"><div class="ic" style="background:${bg};color:${fg}">${ic}</div><div><div class="v">${v}</div><div class="l">${l}</div></div></div>`;
+  document.getElementById('stats').innerHTML=`<div class="stats">
+    ${card('#FBE7E7','#D25151','📴',off,'오프라인')}
+    ${card('#FCEFD6','#B5730A','📦',low,'재고 부족')}
+    ${card('#E3EDFB','#2C6CD0','📝',comp,'미처리 민원')}
+    ${card('#FDE7D0','#C8780A','🛠️',soon,'유지보수 임박')}
+    ${card('#E4F6EC','#22A667','✅',ok,'정상')}</div>`;
+}
+
+function renderTable(){
+  const all=applyFilters(); const total=all.length;
+  const ps=state.pageSize, pages=Math.max(1,Math.ceil(total/ps)); if(state.page>pages) state.page=pages;
+  const rows=all.slice((state.page-1)*ps, state.page*ps);
+  const body=rows.map((l,i)=>{
+    const st=l.deleted?{l:'삭제됨',c:'b-r'}:(STATUS[l.status]||{l:l.status,c:'b-x'});
+    const mi=maintInfo(l);
+    return `<tr${l.deleted?' style="opacity:.6"':''}>
+      <td class="muted">${(state.page-1)*ps+i+1}</td>
+      <td><code>${esc(l.code)}</code></td>
+      <td><span class="lnk" data-id="${l.id}">${esc(l.name)}</span></td>
+      <td>${esc(l.org_name||'')}</td>
+      <td class="muted">${esc([l.sido,l.sigungu].filter(Boolean).join(' '))}</td>
+      <td><span class="badge ${st.c}">${st.l}</span></td>
+      <td><span class="dot ${l.online?'on':'off'}"></span>${l.online?'온라인':'오프라인'}</td>
+      <td>${l.pad_qty==null?'-':`<span class="badge ${l.pad_qty<=10?'b-a':'b-g'}">${l.pad_qty}/${l.pad_cap}</span>`}</td>
+      <td>${l.open_complaints>0?`<span class="badge b-r">${l.open_complaints}건</span>`:'<span class="muted">0</span>'}</td>
+      <td>${mi.state==='none'?'<span class="muted">-</span>':`<span class="badge ${mi.cls}">${mi.txt}</span>`}</td>
+      <td class="muted">${fmtDate(l.created_at)}</td>
+      <td>${l.device_code?`<code>${esc(l.device_code)}</code>`:'<span class="muted">미연결</span>'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('table').innerHTML=`<div class="tcard">
+    <div class="tbar"><h2>화장실 목록 <span class="muted" style="font-weight:400">총 ${total}건</span></h2>
+      <div class="tools">
+        <select id="ps">${[10,20,50,100].map(n=>`<option ${n===ps?'selected':''} value="${n}">${n}개씩 보기</option>`).join('')}</select>
+        <button class="btn sm line" id="refresh">새로고침</button>
+        ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
+      </div></div>
+    <div class="tscroll"><table>
+      <thead><tr><th>No</th><th>코드</th><th>이름</th><th>소속</th><th>지역</th><th>상태</th><th>접속</th><th>재고</th><th>민원</th><th>유지보수</th><th>등록일</th><th>장비코드</th></tr></thead>
+      <tbody>${body||'<tr><td colspan="12" class="muted" style="text-align:center;padding:30px">조건에 맞는 화장실이 없습니다.</td></tr>'}</tbody>
+    </table></div>
+    <div class="pager"><span class="muted">${total===0?0:(state.page-1)*ps+1}–${Math.min(state.page*ps,total)} / ${total}</span>
+      <div class="pg"><button class="btn sm line" id="prev" ${state.page<=1?'disabled':''}>이전</button>
+      <span>${state.page} / ${pages}</span><button class="btn sm line" id="next" ${state.page>=pages?'disabled':''}>다음</button></div></div>
+  </div>`;
+  const t=document.getElementById('table');
+  t.querySelector('#ps').onchange=e=>{ state.pageSize=+e.target.value; state.page=1; renderTable(); };
+  t.querySelector('#refresh').onclick=renderDashboard;
+  const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
+  t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
+  t.querySelector('#next').onclick=()=>{ if(state.page<pages){state.page++;renderTable();} };
+  t.querySelectorAll('.lnk').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
+}
+
+function modalEl(html){ const bd=document.createElement('div'); bd.className='backdrop'; bd.innerHTML=`<div class="modal">${html}</div>`;
+  bd.onclick=e=>{ if(e.target===bd) bd.remove(); }; document.body.appendChild(bd); return bd; }
+
+// ── 화장실 상세 (전체화면 · 개요 + 로그 탭 + CSV) ──
+const LOG_TABS = [
+  { key:'cleaning', label:'청소', table:'cleaning_logs', ts:'cleaned_at',
+    cols:[['cleaned_at','시각','dt'],['cleaner','담당자'],['note','비고']] },
+  { key:'dispense', label:'지급', table:'dispense_logs', ts:'dispensed_at',
+    cols:[['dispensed_at','시각','dt'],['item','품목'],['quantity','수량'],['method','방식'],['status','상태']] },
+  { key:'complaints', label:'민원', table:'complaints', ts:'created_at',
+    cols:[['reception_no','접수번호'],['category','유형'],['detail','내용'],['location_label','위치'],['status','상태'],['created_at','접수','dt']] },
+  { key:'inspections', label:'점검', table:'inspections', ts:'inspected_at',
+    cols:[['inspected_at','시각','dt'],['category','구분'],['title','항목'],['inspector','담당자'],['status','상태']] },
+  { key:'safety', label:'안심', table:'safety_events', ts:'occurred_at',
+    cols:[['occurred_at','시각','dt'],['type','유형'],['title','제목'],['detail','상세'],['status','상태']] },
+  { key:'satisfaction', label:'만족도', table:'satisfaction_responses', ts:'created_at',
+    cols:[['created_at','시각','dt'],['rating','평점'],['comment','의견']] },
+  { key:'env', label:'환경', table:'env_readings', ts:'recorded_at', env:true,
+    cols:[['recorded_at','시각','dt'],['temperature','온도'],['humidity','습도'],['ammonia_ppm','암모니아'],['pm25','PM2.5']] },
+];
+
+function openDetail(id){ state.detailId=id; state.tab='overview'; state.range=30; renderDetail(); }
+
+function renderDetail(){
+  const l=state.locs.find(x=>String(x.id)===String(state.detailId));
+  if(!l){ renderDashboard(); return; }
+  mountShell();
+  const admin=canAdd();
+  const body=document.getElementById('body');
+  const tabs=[{key:'overview',label:'개요'},...LOG_TABS].map(t=>`<div class="tab2 ${state.tab===t.key?'on':''}" data-t="${t.key}">${esc(t.label)}</div>`).join('');
+  body.innerHTML=`<div class="dbar"><button class="btn line sm" id="back">← 목록</button>
+      <h2>${esc(l.name)} <span class="muted" style="font-weight:400"><code>${esc(l.code)}</code> · ${esc(l.org_name||'')}</span></h2></div>
+    <div class="tabs2">${tabs}</div><div id="tab"></div>`;
+  document.getElementById('back').onclick=renderDashboard;
+  body.querySelectorAll('.tab2').forEach(t=>t.onclick=()=>{ state.tab=t.dataset.t; renderDetail(); });
+  renderTab(l, admin);
+}
+
+async function renderTab(l, admin){
+  const el=document.getElementById('tab');
+  if(state.tab==='overview'){ el.innerHTML=overviewHtml(l,admin); wireOverview(l); return; }
+  const tab=LOG_TABS.find(t=>t.key===state.tab);
+  const presets = tab.env ? [['오늘',1],['3일',3],['7일',7]] : [['오늘',1],['7일',7],['30일',30],['전체','null']];
+  if(tab.env && (state.range===null || state.range>7)) state.range=3;
+  el.innerHTML=`<div class="rbar">${presets.map(([lab,d])=>`<button class="chip sm ${String(state.range)===String(d==='null'?null:d)?'on':''}" data-d="${d}">${lab}</button>`).join('')}
+    <span style="flex:1"></span><button class="btn sm line" id="csv">CSV 내보내기</button></div>
+    <div id="logbody" class="muted" style="padding:14px">불러오는 중…</div>`;
+  el.querySelectorAll('.chip[data-d]').forEach(b=>b.onclick=()=>{ state.range=b.dataset.d==='null'?null:+b.dataset.d; renderDetail(); });
+  const res=await fetchLog(tab);
+  const lb=document.getElementById('logbody');
+  if(res.error){ lb.innerHTML=`<div class="err">조회 실패: ${esc(res.error)}</div>`; return; }
+  lb.outerHTML=logTable(tab,res.rows);
+  document.getElementById('csv').onclick=()=>exportCsv(tab,res.rows,l);
+}
+
+async function fetchLog(tab){
+  let q=supabase.from(tab.table).select('*').eq('location_id',state.detailId).order(tab.ts,{ascending:false}).limit(1000);
+  if(state.range){ const from=new Date(Date.now()-state.range*86400000); q=q.gte(tab.ts, from.toISOString()); }
+  const {data,error}=await q;
+  return error?{error:error.message}:{rows:data||[]};
+}
+function badge(label,cls){ return `<span class="badge ${cls}">${esc(label)}</span>`; }
+const CAT_KO = { cleanliness:'청결', facility:'시설', safety:'안전', supplies:'비품' };
+const SAFETY_KO = { emergency_bell:'비상벨', spycam_scan:'몰카탐지', cctv:'CCTV', abnormal_sound:'이상음' };
+function fmtCell(tabKey, field, v){
+  if(v==null||v==='') return '<span class="muted">-</span>';
+  if(field==='status'){
+    if(tabKey==='complaints'){ const m={received:['접수','b-b'],in_progress:['처리중','b-a'],done:['완료','b-g']}[v]; return m?badge(m[0],m[1]):esc(v); }
+    const m={completed:['완료','b-g'],done:['완료','b-g'],normal:['이상없음','b-g'],resolved:['해결','b-g'],confirmed:['확인','b-b']}[v]; return m?badge(m[0],m[1]):esc(v);
+  }
+  if(tabKey==='safety'&&field==='type') return badge(SAFETY_KO[v]||v,'b-b');
+  if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
+  if(tabKey==='dispense'&&field==='method') return badge(String(v).toUpperCase(),'b-b');
+  if(tabKey==='satisfaction'&&field==='rating'){ const n=+v; return `<span class="stars">${'★'.repeat(n)}<span class="star-off">${'★'.repeat(5-n)}</span></span> <span class="muted">${n}.0</span>`; }
+  return esc(String(v));
+}
+function cellHtml(tab,c,r){ if(c[2]==='dt'){ const v=r[c[0]]; return v?`<span class="nowrap">${esc(fmtDt(v))}</span>`:'<span class="muted">-</span>'; } return fmtCell(tab.key,c[0],r[c[0]]); }
+function cellText(tab,c,r){ const v=r[c[0]]; if(v==null||v==='') return ''; if(c[2]==='dt') return fmtDt(v); return fmtCell(tab.key,c[0],v).replace(/<[^>]*>/g,'').trim(); }
+function logTable(tab,rows){
+  const head=tab.cols.map(c=>`<th>${esc(c[1])}</th>`).join('');
+  const body=rows.map(r=>`<tr>${tab.cols.map(c=>`<td>${cellHtml(tab,c,r)}</td>`).join('')}</tr>`).join('');
+  return `<div id="logbody"><div class="muted" style="margin:2px 0 10px">총 ${rows.length}건${rows.length>=1000?' (최대 1000건 표시)':''}</div>
+    <div class="tcard tscroll"><table><thead><tr>${head}</tr></thead>
+    <tbody>${body||`<tr><td colspan="${tab.cols.length}" class="muted" style="text-align:center;padding:28px">기록이 없습니다.</td></tr>`}</tbody></table></div></div>`;
+}
+function exportCsv(tab,rows,l){
+  const head=tab.cols.map(c=>c[1]).join(',');
+  const body=rows.map(r=>tab.cols.map(c=>'"'+cellText(tab,c,r).replace(/"/g,'""')+'"').join(',')).join('\n');
+  download(`${l.code}_${tab.key}.csv`, '﻿'+head+'\n'+body);
+}
+function overviewHtml(l,admin){
+  const st=STATUS[l.status]||{l:l.status};
+  const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
+  const card=(v,lab)=>`<div class="stat"><div><div class="v" style="font-size:22px">${v}</div><div class="l">${lab}</div></div></div>`;
+  return `<div class="ov">
+    ${card((l.today_cleanings||0)+'회','오늘 청소')}
+    ${card(l.pad_qty==null?'-':l.pad_qty+' / '+l.pad_cap,'생리용품 재고')}
+    ${card((l.open_complaints||0)+'건','미처리 민원')}
+    ${card(l.online?'온라인':'오프라인','접속')}</div>
+    <div class="card pad"><div class="kv">
+      ${row('코드',`<code>${esc(l.code)}</code>`)}
+      ${row('소속',esc(l.org_name||'-'))}
+      ${row('지역',esc([l.sido,l.sigungu].filter(Boolean).join(' ')||'-'))}
+      ${row('상태',esc(st.l))}
+      ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
+      ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
+      ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
+      ${row('등록일',fmtDate(l.created_at))}
+    </div>
+    ${admin?`<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      ${l.deleted?`<button class="btn" data-restore>복원</button>`:`<button class="btn" data-edit>수정</button><button class="btn line" style="color:#B5730A;border-color:#F0D9AF" data-soft>삭제(보관)</button>`}
+      <button class="btn line" style="color:#D25151;border-color:#F3C2C2" data-hard>완전 삭제</button>
+      ${!l.deleted&&l.paired?'<button class="btn line" data-unpair>재페어링 초기화</button>':''}
+      ${!l.deleted?'<button class="btn line" data-reissue>코드 재발급</button>':''}</div>`:''}
+    </div>`;
+}
+function wireOverview(l){
+  const q=sel=>document.querySelector(sel);
+  const act=async(fn,body,after)=>{ try{ await rpc(fn,body); renderDashboard(); }catch(e){ alert((after||'실패')+': '+e.message); } };
+  const edit=q('[data-edit]'); if(edit) edit.onclick=()=>openEdit(l);
+  const soft=q('[data-soft]'); if(soft) soft.onclick=()=>{ if(confirm(`'${l.name}'을(를) 삭제(보관) 처리할까요?`)) act('admin_soft_delete_location',{p_id:l.id},'삭제 실패'); };
+  const restore=q('[data-restore]'); if(restore) restore.onclick=()=>act('admin_restore_location',{p_id:l.id},'복원 실패');
+  const hard=q('[data-hard]'); if(hard) hard.onclick=()=>{ if(confirm(`[완전 삭제] '${l.name}' — 기록이 영구 삭제됩니다. 계속할까요?`)) act('admin_delete_location',{p_id:l.id},'완전삭제 실패'); };
+  const unpair=q('[data-unpair]'); if(unpair) unpair.onclick=()=>{ if(confirm(`'${l.name}' 단말 연결을 해제할까요? 같은 코드로 재등록할 수 있습니다.`)) act('admin_unpair_device',{p_location_id:l.id},'초기화 실패'); };
+  const reissue=q('[data-reissue]'); if(reissue) reissue.onclick=async()=>{ if(!confirm(`'${l.name}' 페어링 코드를 새로 발급할까요? 기존 코드는 사용 불가.`)) return;
+    try{ const r=await rpc('admin_reissue_pairing_code',{p_location_id:l.id}); alert('새 코드: '+((r.codes||[]).join(', ')||'-')); renderDashboard(); }catch(e){ alert('재발급 실패: '+e.message); } };
+}
+
+function openEdit(l){
+  const opt=(v,lab)=>`<option value="${v}" ${l.status===v?'selected':''}>${lab}</option>`;
+  const bd=modalEl(`<h2 style="margin:0 0 14px">화장실 수정 — ${esc(l.code)}</h2>
+    <div class="grid2">
+      <div><label class="f">이름</label><input id="e_name" value="${esc(l.name)}"/></div>
+      <div><label class="f">상태</label><select id="e_status">${opt('active','운영중')}${opt('maintenance','점검중')}${opt('inactive','중지')}</select></div>
+      <div><label class="f">시·도</label><input id="e_sido" value="${esc(l.sido||'')}"/></div>
+      <div><label class="f">시·군·구</label><input id="e_sigungu" value="${esc(l.sigungu||'')}"/></div>
+      <div><label class="f">재고 (최대 ${l.pad_cap??30})</label><input id="e_stock" type="number" value="${l.pad_qty??0}"/></div>
+      <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
+    </div><div id="e_msg" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px"><button class="btn" data-save>저장</button><button class="btn line" data-x>취소</button></div>`);
+  bd.querySelectorAll('input,select').forEach(el=>el.style.width='100%');
+  bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  bd.querySelector('[data-save]').onclick=async()=>{
+    const q=s=>bd.querySelector(s);
+    try{
+      await rpc('admin_update_location',{ p_id:l.id,
+        p_name:q('#e_name').value.trim()||null, p_sido:q('#e_sido').value.trim()||null,
+        p_sigungu:q('#e_sigungu').value.trim()||null, p_status:q('#e_status').value,
+        p_stock:parseInt(q('#e_stock').value||'0',10), p_maintenance_until:q('#e_maint').value||null });
+      bd.remove(); renderDashboard();
+    }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
+  };
+}
+
+// ── 화장실 추가 ──
+function orgOptions(){return state.orgs.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');}
+function renderAdd(){
+  mountShell();
+  const body=document.getElementById('body');
+  body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h2 style="margin:0">화장실 등록</h2><button class="btn line sm" id="back">← 목록</button></div>
+    <div class="tabs"><div class="tab active" data-t="one">단일 등록</div><div class="tab" data-t="many">여러 개 (50~100)</div></div><div id="pane"></div>`;
+  document.getElementById('back').onclick=renderDashboard;
+  body.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{body.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');t.dataset.t==='one'?one():many();});
+  one();
+  function one(){
+    document.getElementById('pane').innerHTML=`<div class="card pad" style="max-width:640px">
+      <label class="f">지자체</label><select id="org">${orgOptions()}</select><div style="height:10px"></div>
+      <div class="grid2">
+        <div><label class="f">코드(고유)</label><input id="code" placeholder="GG-SUWON-003"/></div>
+        <div><label class="f">이름</label><input id="name" placeholder="광교호수공원 공중화장실"/></div>
+        <div><label class="f">시·군·구</label><input id="sigungu" placeholder="수원시"/></div>
+        <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
+        <div><label class="f">단말 라벨(선택)</label><input id="dlabel" placeholder="입구 키오스크"/></div>
+      </div><div id="msg" style="margin:8px 0"></div>
+      <button class="btn" id="save">등록하고 페어링 코드 받기</button></div>`;
+    document.getElementById('save').onclick=async()=>{
+      const q=id=>document.getElementById(id); const msg=q('msg');
+      const p_code=q('code').value.trim(), p_name=q('name').value.trim();
+      if(!p_code||!p_name){msg.innerHTML='<div class="err">코드와 이름은 필수입니다.</div>';return;}
+      try{const res=await rpc('admin_create_location',{p_org_code:q('org').value,p_code,p_name,p_sigungu:q('sigungu').value.trim()||null,p_device_label:q('dlabel').value.trim()||null,p_stock:parseInt(q('stock').value||'0',10)});
+        msg.innerHTML=`<div class="ok">등록 완료! 페어링 코드: <code>${esc(res.pairing_code)}</code></div>`; q('code').value='';q('name').value='';
+      }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
+    };
+  }
+  function many(){
+    document.getElementById('pane').innerHTML=`<div class="card pad">
+      <label class="f">지자체(전체 적용)</label><select id="org" style="max-width:400px">${orgOptions()}</select>
+      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>코드,이름,시군구,재고</code></label>
+      <textarea id="csv" placeholder="GG-SUWON-010,매산로 공중화장실,수원시,20
+GG-SUWON-011,행궁동 공중화장실,수원시,15"></textarea>
+      <div id="msg" style="margin:8px 0"></div><button class="btn" id="run">일괄 등록</button>
+      <div id="result" style="margin-top:14px"></div></div>`;
+    document.getElementById('run').onclick=async()=>{
+      const msg=document.getElementById('msg'); const org=document.getElementById('org').value;
+      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,code:c[0],name:c[1]||c[0],sigungu:c[2]||'',stock:c[3]||'0'};}).filter(r=>r.code);
+      if(!rows.length){msg.innerHTML='<div class="err">추가할 행이 없습니다.</div>';return;}
+      if(rows.length>500){msg.innerHTML='<div class="err">한 번에 500개 이하로 나눠 주세요.</div>';return;}
+      msg.innerHTML=`<div class="muted">${rows.length}개 처리 중…</div>`;
+      try{const res=await rpc('admin_bulk_create_locations',{p_rows:rows});
+        const ok=res.filter(r=>r.status==='ok').length,dup=res.filter(r=>r.status==='duplicate').length,er=res.filter(r=>r.status==='error').length;
+        msg.innerHTML=`<div class="ok">완료: 성공 ${ok} · 중복 ${dup} · 오류 ${er}</div>`;
+        const b=res.map(r=>`<tr><td>${esc(r.code)}</td><td>${r.pairing_code?`<code>${esc(r.pairing_code)}</code>`:'-'}</td><td>${r.status==='ok'?'<span class="badge b-g">성공</span>':r.status==='duplicate'?'<span class="badge b-a">중복</span>':`<span class="badge b-r">오류</span> <span class="muted">${esc(r.message||'')}</span>`}</td></tr>`).join('');
+        document.getElementById('result').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0"><b>결과</b><button class="btn sm line" id="dl">페어링 코드 CSV</button></div><div class="tcard tscroll"><table><thead><tr><th>코드</th><th>페어링코드</th><th>상태</th></tr></thead><tbody>${b}</tbody></table></div>`;
+        document.getElementById('dl').onclick=()=>download('pairing-codes.csv','code,pairing_code,status\n'+res.map(r=>`${r.code},${r.pairing_code||''},${r.status}`).join('\n'));
+      }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
+    };
+  }
+}
+
+// ── 부팅 ──
+async function boot(){
+  const{data:{user}}=await supabase.auth.getUser();
+  if(!user){ renderLogin(); return; }   // 세션 만료/무효 → 로그인
+  const{data:prof}=await supabase.from('profiles').select('full_name, role, org_id').eq('id',user.id).maybeSingle();
+  state.profile=prof||{}; state.role=prof?.role||null;
+  const{data:orgs}=await supabase.from('organizations').select('code, name').order('name');
+  state.orgs=orgs||[]; renderDashboard();
+}
+try{
+  const{data:{session}}=await supabase.auth.getSession();
+  if(session) await boot(); else renderLogin();
+}catch(e){
+  app.innerHTML=`<div style="padding:28px;font-family:sans-serif"><h3 style="color:#c00">콘솔 오류</h3><p>${esc(e&&e.message||e)}</p><button onclick="location.reload()" style="padding:8px 16px">새로고침</button> <button onclick="localStorage.clear();location.reload()" style="padding:8px 16px">세션 초기화 후 새로고침</button></div>`;
+}
+// 예기치 못한 오류도 빈 화면 대신 표시
+window.addEventListener('unhandledrejection',ev=>{ if(app.innerHTML.trim()==='') app.innerHTML=`<div style="padding:28px;color:#c00">오류: ${esc((ev.reason&&ev.reason.message)||ev.reason||'')}</div>`; });
+</script>
+</body>
+</html>
