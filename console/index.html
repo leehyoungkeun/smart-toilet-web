@@ -387,6 +387,10 @@ function wireOverview(l){
 
 // 키오스크 화면에 나오는 항목과 같은 키를 쓴다(lib/comfort.js).
 const SENSOR_KEYS=[['temperature','온도'],['humidity','습도'],['ammonia','암모니아(악취)'],['pm25','미세먼지']];
+// 안전 시설·기능. 없는 것을 켜 두면 시민이 위급 상황에서 그걸 믿고 행동한다.
+const FEATURE_KEYS=[['emergency_bell','안심 비상벨'],['cctv_link','외부 CCTV 연계'],
+  ['sound_detection','디지털 이상음 감지'],['camera_detection','불법촬영 탐지'],
+  ['dispenser','생리용품 배출기']];
 function openEdit(l){
   const opt=(v,lab)=>`<option value="${v}" ${l.status===v?'selected':''}>${lab}</option>`;
   const bd=modalEl(`<h2 style="margin:0 0 14px">화장실 수정 — ${esc(l.code)}</h2>
@@ -406,14 +410,24 @@ function openEdit(l){
     <div style="font-size:12px;color:#6B7A95;margin-bottom:4px">
       끄면 키오스크 화면에서 그 항목이 사라집니다. 센서가 없는데 켜 두면 값 0 이 &ldquo;좋음&rdquo; 으로 표시됩니다.
     </div>
+    <label class="f" style="margin-top:14px;display:block">설치된 안전시설·기능</label>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
+      ${FEATURE_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
+        <input type="checkbox" data-feature="${k}" style="width:auto"/> ${lab}</label>`).join('')}
+    </div>
+    <div style="font-size:12px;color:#C0392B;margin-bottom:4px">
+      안전시설이 하나라도 켜져야 키오스크 상단에 &ldquo;안심 모드 작동 중&rdquo; 이 표시됩니다.
+      설치되지 않은 것을 켜 두면 시민이 위급 상황에서 없는 기능을 믿게 됩니다.
+    </div>
     <div id="e_msg" style="margin:10px 0"></div>
     <div style="display:flex;gap:8px"><button class="btn" data-save>저장</button><button class="btn line" data-x>취소</button></div>`);
   bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; });
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
   // 현재 센서 구성을 읽어 체크 상태를 맞춘다. 실패해도 나머지 수정은 가능해야 하므로 조용히 넘어간다.
-  supabase.from('location_settings').select('sensors').eq('location_id',l.id).maybeSingle()
-    .then(({data})=>{ const cur=(data&&data.sensors)||{};
-      bd.querySelectorAll('[data-sensor]').forEach(cb=>{ cb.checked=!!cur[cb.dataset.sensor]; }); })
+  supabase.from('location_settings').select('sensors,features').eq('location_id',l.id).maybeSingle()
+    .then(({data})=>{ const cs=(data&&data.sensors)||{}, cf=(data&&data.features)||{};
+      bd.querySelectorAll('[data-sensor]').forEach(cb=>{ cb.checked=!!cs[cb.dataset.sensor]; });
+      bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; }); })
     .catch(()=>{});
   bd.querySelector('[data-save]').onclick=async()=>{
     const q=s=>bd.querySelector(s);
@@ -425,6 +439,8 @@ function openEdit(l){
       // 센서 구성은 별도 RPC. 켜진 것만 담는다 — 없는 키는 미설치로 읽힌다.
       const sensors={}; bd.querySelectorAll('[data-sensor]').forEach(cb=>{ if(cb.checked) sensors[cb.dataset.sensor]=true; });
       await rpc('admin_set_sensors',{p_location_id:l.id,p_sensors:sensors});
+      const features={}; bd.querySelectorAll('[data-feature]').forEach(cb=>{ if(cb.checked) features[cb.dataset.feature]=true; });
+      await rpc('admin_set_features',{p_location_id:l.id,p_features:features});
       bd.remove(); renderDashboard();
     }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
