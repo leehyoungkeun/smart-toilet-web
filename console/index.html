@@ -339,8 +339,11 @@ const LOG_TABS = [
     cols:[['cleaned_at','시각','dt'],['cleaner','담당자'],['note','비고']] },
   { key:'dispense', label:'지급', table:'dispense_logs', ts:'dispensed_at',
     cols:[['dispensed_at','시각','dt'],['item','품목'],['quantity','수량'],['method','방식'],['status','상태']] },
-  { key:'complaints', label:'민원', table:'complaints', ts:'created_at',
-    cols:[['reception_no','접수번호'],['category','유형'],['detail','내용'],['location_label','위치'],['status','상태'],['created_at','접수','dt']] },
+  // 연락처는 가려서 보여준다(mask_phone). 명단을 통째로 볼 이유가 있는
+  // 사람은 없다 — 회신은 시스템이 보낸다.
+  { key:'complaints', label:'민원', table:'complaints', ts:'created_at', rpc:'location_complaints',
+    cols:[['reception_no','접수번호'],['category','유형'],['detail','내용'],['location_label','위치'],
+          ['contact_masked','연락처'],['status','상태'],['created_at','접수','dt']] },
   { key:'inspections', label:'점검', table:'inspections', ts:'inspected_at',
     cols:[['inspected_at','시각','dt'],['category','구분'],['title','항목'],['inspector','담당자'],['status','상태']] },
   { key:'safety', label:'안심', table:'safety_events', ts:'occurred_at',
@@ -414,6 +417,17 @@ async function renderTab(l, admin){
 }
 
 async function fetchLog(tab){
+  // 연락처가 있는 표는 직접 select 하지 않는다. 원본 번호가 그대로 내려온다.
+  // 가려서 주는 RPC 를 타고, 기간은 받아 온 뒤 걸러 낸다.
+  if(tab.rpc){
+    try{
+      const rows=await rpc(tab.rpc,{p_location:state.detailId,p_limit:1000});
+      const a=state.lfrom?new Date(state.lfrom+'T00:00:00'):(state.range?new Date(Date.now()-state.range*86400000):null);
+      const b=state.lto?new Date(state.lto+'T23:59:59.999'):null;
+      return {rows:(rows||[]).filter(r=>{ const t=new Date(r[tab.ts]);
+        return (!a||t>=a) && (!b||t<=b); })};
+    }catch(e){ return {error:e.message}; }
+  }
   let q=supabase.from(tab.table).select('*').eq('location_id',state.detailId).order(tab.ts,{ascending:false}).limit(1000);
   if(state.lfrom || state.lto){
     // 날짜를 직접 넣었으면 그것이 우선이다. 종료일은 그날 끝까지 포함해야
@@ -557,7 +571,10 @@ const SENSOR_KEYS=[['temperature','온도'],['humidity','습도'],['ammonia','�
 // 안전 시설·기능. 없는 것을 켜 두면 시민이 위급 상황에서 그걸 믿고 행동한다.
 const FEATURE_KEYS=[['emergency_bell','안심 비상벨'],['cctv_link','외부 CCTV 연계'],
   ['sound_detection','디지털 이상음 감지'],['camera_detection','불법촬영 탐지'],
-  ['dispenser','생리용품 배출기']];
+  ['dispenser','생리용품 배출기'],
+  // 켜면 민원 화면에 연락처 칸이 생긴다. 보낼 채널(알림톡·SMS)이 준비된
+  // 뒤에 켤 것 — 번호를 받아 놓고 회신이 안 가면 지금보다 나쁘다.
+  ['complaint_feedback','민원 처리결과 회신']];
 function openEdit(l){
   const opt=(v,lab)=>`<option value="${v}" ${l.status===v?'selected':''}>${lab}</option>`;
   const bd=modalEl(`<h2 style="margin:0 0 14px">화장실 수정 — ${esc(l.code)}</h2>
