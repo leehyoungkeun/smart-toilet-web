@@ -94,7 +94,7 @@ const SUPABASE_URL='https://jrcvrlyvkdoxtjlhmapm.supabase.co';
 const SUPABASE_KEY='sb_publishable_JD6Mcz3_Hk2N5jX0zauvLg_pGihCjYn';
 const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
 const app=document.getElementById('app');
-const state={ role:null, profile:{}, orgs:[], locs:[], filters:{}, page:1, pageSize:20 };
+const state={ role:null, profile:{}, orgs:[], regions:[], locs:[], filters:{}, page:1, pageSize:20 };
 const ROLE_LABEL={platform_admin:'플랫폼 관리자(전체)',org_admin:'지자체 관리자',operator:'운영자'};
 const STATUS={active:{l:'운영중',c:'b-g'},maintenance:{l:'점검중',c:'b-a'},inactive:{l:'중지',c:'b-x'}};
 const canAdd=()=>state.role==='platform_admin'||state.role==='org_admin';
@@ -397,8 +397,7 @@ function openEdit(l){
     <div class="grid2">
       <div><label class="f">이름</label><input id="e_name" value="${esc(l.name)}"/></div>
       <div><label class="f">상태</label><select id="e_status">${opt('active','운영중')}${opt('maintenance','점검중')}${opt('inactive','중지')}</select></div>
-      <div><label class="f">시·도</label><input id="e_sido" value="${esc(l.sido||'')}"/></div>
-      <div><label class="f">시·군·구</label><input id="e_sigungu" value="${esc(l.sigungu||'')}"/></div>
+      ${regionPicker('e',l.sido,l.sigungu)}
       <div><label class="f">재고 (최대 ${l.pad_cap??30})</label><input id="e_stock" type="number" value="${l.pad_qty??0}"/></div>
       <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
     </div>
@@ -422,6 +421,7 @@ function openEdit(l){
     <div id="e_msg" style="margin:10px 0"></div>
     <div style="display:flex;gap:8px"><button class="btn" data-save>저장</button><button class="btn line" data-x>취소</button></div>`);
   bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; });
+  wireRegion(bd,'e');
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
   // 현재 센서 구성을 읽어 체크 상태를 맞춘다. 실패해도 나머지 수정은 가능해야 하므로 조용히 넘어간다.
   supabase.from('location_settings').select('sensors,features').eq('location_id',l.id).maybeSingle()
@@ -432,9 +432,10 @@ function openEdit(l){
   bd.querySelector('[data-save]').onclick=async()=>{
     const q=s=>bd.querySelector(s);
     try{
+      // 지역은 기관 코드로만 보낸다. 시도·시군구는 서버가 계층에서 채운다.
       await rpc('admin_update_location',{ p_id:l.id,
-        p_name:q('#e_name').value.trim()||null, p_sido:q('#e_sido').value.trim()||null,
-        p_sigungu:q('#e_sigungu').value.trim()||null, p_status:q('#e_status').value,
+        p_name:q('#e_name').value.trim()||null, p_org_code:pickedOrg(bd,'e'),
+        p_status:q('#e_status').value,
         p_stock:parseInt(q('#e_stock').value||'0',10), p_maintenance_until:q('#e_maint').value||null });
       // 센서 구성은 별도 RPC. 켜진 것만 담는다 — 없는 키는 미설치로 읽힌다.
       const sensors={}; bd.querySelectorAll('[data-sensor]').forEach(cb=>{ if(cb.checked) sensors[cb.dataset.sensor]=true; });
@@ -445,6 +446,36 @@ function openEdit(l){
     }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
 }
+
+// ── 지역 선택 ──
+// 시·도를 고르면 시·군·구가 따라 바뀐다. 타이핑할 자리가 없으므로 오타가
+// 원천적으로 불가능하다. 고른 시·군·구의 값이 곧 기관 코드라, 소속과 지역이
+// 어긋날 수도 없다.
+//
+// 세종특별자치시는 단층제라 하위가 없다. 이 경우 시·군·구 칸에 '해당 없음'
+// 하나만 뜨고 값은 광역 코드가 된다.
+function sidoList(){ return [...new Set(state.regions.map(r=>r.sido))].sort(); }
+function regionPicker(id,sido,sigungu){
+  const cur=sido||sidoList()[0]||'';
+  return `<div><label class="f">시·도</label><select id="${id}_sido">
+      ${sidoList().map(s=>`<option ${s===cur?'selected':''}>${esc(s)}</option>`).join('')}
+    </select></div>
+    <div><label class="f">시·군·구</label><select id="${id}_sgg" data-want="${esc(sigungu||'')}"></select></div>`;
+}
+function fillSgg(root,id){
+  const sido=root.querySelector(`#${id}_sido`).value;
+  const sel=root.querySelector(`#${id}_sgg`);
+  const want=sel.dataset.want||'';
+  sel.innerHTML=state.regions.filter(r=>r.sido===sido)
+    .map(r=>`<option value="${esc(r.code)}" ${r.sigungu===want?'selected':''}>${esc(r.sigungu||'해당 없음 (단층제)')}</option>`).join('');
+  sel.dataset.want='';   // 최초 1회만 복원한다
+}
+function wireRegion(root,id){
+  fillSgg(root,id);
+  root.querySelector(`#${id}_sido`).onchange=()=>fillSgg(root,id);
+}
+// 선택된 기초 기관 코드. 이것 하나만 서버로 보내면 시도·시군구가 따라온다.
+function pickedOrg(root,id){ return root.querySelector(`#${id}_sgg`).value||null; }
 
 // ── 화장실 추가 ──
 function orgOptions(){return state.orgs.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');}
@@ -457,36 +488,45 @@ function renderAdd(){
   body.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{body.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');t.dataset.t==='one'?one():many();});
   one();
   function one(){
-    document.getElementById('pane').innerHTML=`<div class="card pad" style="max-width:640px">
-      <label class="f">지자체</label><select id="org">${orgOptions()}</select><div style="height:10px"></div>
+    const pane=document.getElementById('pane');
+    pane.innerHTML=`<div class="card pad" style="max-width:640px">
       <div class="grid2">
+        ${regionPicker('a')}
         <div><label class="f">코드(고유)</label><input id="code" placeholder="GG-SUWON-003"/></div>
         <div><label class="f">이름</label><input id="name" placeholder="광교호수공원 공중화장실"/></div>
-        <div><label class="f">시·군·구</label><input id="sigungu" placeholder="수원시"/></div>
         <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
         <div><label class="f">단말 라벨(선택)</label><input id="dlabel" placeholder="입구 키오스크"/></div>
       </div><div id="msg" style="margin:8px 0"></div>
       <button class="btn" id="save">등록하고 페어링 코드 받기</button></div>`;
+    wireRegion(pane,'a');
     document.getElementById('save').onclick=async()=>{
       const q=id=>document.getElementById(id); const msg=q('msg');
       const p_code=q('code').value.trim(), p_name=q('name').value.trim();
       if(!p_code||!p_name){msg.innerHTML='<div class="err">코드와 이름은 필수입니다.</div>';return;}
-      try{const res=await rpc('admin_create_location',{p_org_code:q('org').value,p_code,p_name,p_sigungu:q('sigungu').value.trim()||null,p_device_label:q('dlabel').value.trim()||null,p_stock:parseInt(q('stock').value||'0',10)});
+      const org=pickedOrg(pane,'a');
+      if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
+      try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,p_device_label:q('dlabel').value.trim()||null,p_stock:parseInt(q('stock').value||'0',10)});
         msg.innerHTML=`<div class="ok">등록 완료! 페어링 코드: <code>${esc(res.pairing_code)}</code></div>`; q('code').value='';q('name').value='';
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
   }
   function many(){
-    document.getElementById('pane').innerHTML=`<div class="card pad">
-      <label class="f">지자체(전체 적용)</label><select id="org" style="max-width:400px">${orgOptions()}</select>
-      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>코드,이름,시군구,재고</code></label>
-      <textarea id="csv" placeholder="GG-SUWON-010,매산로 공중화장실,수원시,20
-GG-SUWON-011,행궁동 공중화장실,수원시,15"></textarea>
+    const pane=document.getElementById('pane');
+    pane.innerHTML=`<div class="card pad">
+      <label class="f">지역(전체 적용)</label>
+      <div class="grid2" style="max-width:520px">${regionPicker('b')}</div>
+      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>코드,이름,재고</code></label>
+      <textarea id="csv" placeholder="GG-SUWON-010,매산로 공중화장실,20
+GG-SUWON-011,행궁동 공중화장실,15"></textarea>
+      <div style="font-size:12px;color:#6B7A95;margin-top:4px">
+        지역은 위에서 고른 것이 모든 행에 적용됩니다. 시·군·구가 다르면 나눠서 등록하세요.
+      </div>
       <div id="msg" style="margin:8px 0"></div><button class="btn" id="run">일괄 등록</button>
       <div id="result" style="margin-top:14px"></div></div>`;
     document.getElementById('run').onclick=async()=>{
-      const msg=document.getElementById('msg'); const org=document.getElementById('org').value;
-      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,code:c[0],name:c[1]||c[0],sigungu:c[2]||'',stock:c[3]||'0'};}).filter(r=>r.code);
+      const msg=document.getElementById('msg'); const org=pickedOrg(pane,'b');
+      if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
+      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,code:c[0],name:c[1]||c[0],stock:c[2]||'0'};}).filter(r=>r.code);
       if(!rows.length){msg.innerHTML='<div class="err">추가할 행이 없습니다.</div>';return;}
       if(rows.length>500){msg.innerHTML='<div class="err">한 번에 500개 이하로 나눠 주세요.</div>';return;}
       msg.innerHTML=`<div class="muted">${rows.length}개 처리 중…</div>`;
@@ -508,7 +548,10 @@ async function boot(){
   const{data:prof}=await supabase.from('profiles').select('full_name, role, org_id').eq('id',user.id).maybeSingle();
   state.profile=prof||{}; state.role=prof?.role||null;
   const{data:orgs}=await supabase.from('organizations').select('code, name').order('name');
-  state.orgs=orgs||[]; renderDashboard();
+  state.orgs=orgs||[];
+  // 등록·수정에서 고를 수 있는 지역 목록. 권한 밖의 지자체는 여기에 오지 않는다.
+  try{ state.regions=await rpc('org_regions'); }catch(e){ state.regions=[]; }
+  renderDashboard();
 }
 try{
   const{data:{session}}=await supabase.auth.getSession();
