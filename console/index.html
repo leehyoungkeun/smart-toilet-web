@@ -102,6 +102,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 async function rpc(fn,body){const{data,error}=await supabase.rpc(fn,body||{});if(error)throw error;return data;}
 function download(name,text){const b=new Blob([text],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
 function fmtDate(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${n.getFullYear()}. ${p(n.getMonth()+1)}. ${p(n.getDate())}`;}catch{return'';}}
+function fmtDateTime(iso){if(!iso)return'';try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${p(n.getMonth()+1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;}catch{return'';}}
 function fmtDt(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${p(n.getMonth()+1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;}catch{return'-';}}
 function defFilters(){return{q:'',region:'',sigungu:'',status:'',online:'',stock:'',maint:'',from:null,to:null};}
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
@@ -238,6 +239,7 @@ function renderTable(){
       <div class="tools">
         <select id="ps">${[10,20,50,100].map(n=>`<option ${n===ps?'selected':''} value="${n}">${n}개씩 보기</option>`).join('')}</select>
         <button class="btn sm line" id="refresh">새로고침</button>
+        ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
     <div class="tscroll"><table>
@@ -252,6 +254,7 @@ function renderTable(){
   t.querySelector('#ps').onchange=e=>{ state.pageSize=+e.target.value; state.page=1; renderTable(); };
   t.querySelector('#refresh').onclick=renderDashboard;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
+  const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
   t.querySelector('#next').onclick=()=>{ if(state.page<pages){state.page++;renderTable();} };
   t.querySelectorAll('.lnk').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
@@ -476,6 +479,155 @@ function wireRegion(root,id){
 }
 // 선택된 기초 기관 코드. 이것 하나만 서버로 보내면 시도·시군구가 따라온다.
 function pickedOrg(root,id){ return root.querySelector(`#${id}_sgg`).value||null; }
+
+// ── 알림 수신자 ──
+// 담당자는 인사이동으로 바뀌고 위탁업체는 계약 단위로 갈린다. DB 를 직접
+// 고치는 방식으로는 운영이 안 된다.
+const T_ROLE={vendor:'청소 위탁업체',municipal:'기초지자체 담당',province:'광역 담당',internal:'전체 (우리)'};
+const T_CHAN={email:'이메일',sms:'문자',telegram:'텔레그램',kakao:'알림톡'};
+// 역할마다 받아야 할 것이 다르다. 위탁업체에 고장 민원을 보내면 할 수 있는
+// 것이 없고, 도청에 재고 3개를 보내면 며칠 만에 알림을 끈다.
+const T_EVENTS=[['inventory_low','재고 부족'],['inventory_empty','재고 소진'],
+  ['complaint_new','새 민원'],['complaint_stale','묵은 민원'],['daily_summary','일일 요약']];
+const T_DEFAULTS={vendor:['inventory_low','inventory_empty','complaint_new'],
+  municipal:['inventory_empty','complaint_stale','daily_summary'],
+  province:['daily_summary'],
+  internal:['inventory_low','inventory_empty','complaint_new','complaint_stale','daily_summary']};
+
+async function renderTargets(){
+  mountShell();
+  const body=document.getElementById('body');
+  body.innerHTML='<div class="muted">불러오는 중…</div>';
+  let rows=[];
+  try{ rows=await rpc('admin_list_targets'); }
+  catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  const tr=rows.map(t=>`<tr>
+    <td>${esc(t.name)}</td>
+    <td>${esc(T_ROLE[t.role]||t.role)}</td>
+    <td>${esc(t.scope_name||'-')}</td>
+    <td>${esc(T_CHAN[t.channel]||t.channel)}</td>
+    <td class="muted">${esc(t.address||'(기본)')}</td>
+    <td class="muted">${(t.events||[]).map(k=>(T_EVENTS.find(e=>e[0]===k)||[,k])[1]).join(', ')}</td>
+    <td>${t.active?'<span class="badge b-g">받는 중</span>':'<span class="badge b-x">중지</span>'}</td>
+    <td><button class="btn sm line" data-edit="${esc(t.id)}">수정</button></td></tr>`).join('');
+  body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0">알림 수신자</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn sm line" id="log">발송 내역</button>
+        <button class="btn sm" id="new">＋ 수신자 추가</button>
+        <button class="btn line sm" id="back">← 목록</button></div></div>
+    <div class="tcard"><div class="tscroll"><table>
+      <thead><tr><th>이름</th><th>역할</th><th>범위</th><th>채널</th><th>주소</th><th>받는 알림</th><th>상태</th><th></th></tr></thead>
+      <tbody>${tr||'<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">등록된 수신자가 없습니다.</td></tr>'}</tbody>
+    </table></div></div>
+    <div style="font-size:12px;color:#6B7A95;margin-top:10px">
+      같은 알림은 하루 한 번만 갑니다. 긴급(재고 소진·고장 민원)이 아니면 평일 09~18시에 도착합니다.<br>
+      더 이상 받지 않게 하려면 지우는 대신 <b>중지</b>로 두세요 — 지우면 발송 내역도 함께 사라집니다.
+    </div>`;
+  document.getElementById('back').onclick=renderDashboard;
+  document.getElementById('new').onclick=()=>editTarget(null);
+  document.getElementById('log').onclick=renderNotifyLog;
+  body.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editTarget(rows.find(x=>x.id===b.dataset.edit)));
+}
+
+function editTarget(t){
+  const isNew=!t; t=t||{role:'vendor',channel:'email',active:true,events:T_DEFAULTS.vendor};
+  const sel=(v,cur)=>v===cur?'selected':'';
+  const canInternal=state.role==='platform_admin';
+  const bd=modalEl(`<h2 style="margin:0 0 14px">${isNew?'수신자 추가':'수신자 수정'}</h2>
+    <div class="grid2">
+      <div><label class="f">이름·부서</label><input id="t_name" value="${esc(t.name||'')}" placeholder="수원시 여성정책과 김OO"/></div>
+      <div><label class="f">역할</label><select id="t_role">
+        ${Object.entries(T_ROLE).filter(([k])=>k!=='internal'||canInternal)
+          .map(([k,v])=>`<option value="${k}" ${sel(k,t.role)}>${v}</option>`).join('')}</select></div>
+      <div><label class="f">채널</label><select id="t_chan">
+        ${Object.entries(T_CHAN).map(([k,v])=>`<option value="${k}" ${sel(k,t.channel)}>${v}</option>`).join('')}</select></div>
+      <div><label class="f">주소</label><input id="t_addr" value="${esc(t.address||'')}" placeholder="hong@suwon.go.kr"/></div>
+    </div>
+    <label class="f" style="margin-top:14px;display:block">범위 — 어느 화장실의 알림을 받나</label>
+    <div id="t_scopewrap">
+      <select id="t_scope" style="margin-bottom:8px">
+        <option value="org">지자체 전체</option>
+        <option value="loc">특정 화장실만</option>
+        <option value="all">전 지자체 (우리)</option>
+      </select>
+      <div class="grid2" id="t_org">${regionPicker('t')}</div>
+      <div id="t_locwrap" style="display:none"><select id="t_loc">
+        ${(state.locs||[]).filter(l=>!l.deleted).map(l=>`<option value="${esc(l.id)}" ${sel(l.id,t.location_id)}>${esc(l.name)}</option>`).join('')}
+      </select></div>
+    </div>
+    <label class="f" style="margin-top:14px;display:block">받을 알림</label>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
+      ${T_EVENTS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
+        <input type="checkbox" data-ev="${k}" style="width:auto" ${(t.events||[]).includes(k)?'checked':''}/> ${lab}</label>`).join('')}
+    </div>
+    <div style="font-size:12px;color:#6B7A95">역할을 바꾸면 권장 항목으로 다시 채워집니다.</div>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:14px">
+      <input type="checkbox" id="t_active" style="width:auto" ${t.active!==false?'checked':''}/> 알림 받는 중</label>
+    <div id="t_msg" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px"><button class="btn" data-save>저장</button>
+      ${isNew?'':'<button class="btn line" data-del>삭제</button>'}
+      <button class="btn line" data-x>취소</button></div>`);
+  bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; });
+  wireRegion(bd,'t');
+  const q=s=>bd.querySelector(s);
+  // 범위 전환
+  const scope=q('#t_scope');
+  scope.value = t.location_id?'loc' : (t.role==='internal'||(!t.org_code&&!t.location_id&&!isNew))?'all':'org';
+  const syncScope=()=>{ q('#t_org').style.display=scope.value==='org'?'':'none';
+    q('#t_locwrap').style.display=scope.value==='loc'?'':'none'; };
+  scope.onchange=syncScope; syncScope();
+  // 역할을 바꾸면 권장 항목으로 다시 채운다
+  q('#t_role').onchange=()=>{ const d=T_DEFAULTS[q('#t_role').value]||[];
+    bd.querySelectorAll('[data-ev]').forEach(cb=>{ cb.checked=d.includes(cb.dataset.ev); });
+    if(q('#t_role').value==='internal'){ scope.value='all'; syncScope(); } };
+  bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  const del=bd.querySelector('[data-del]');
+  if(del) del.onclick=async()=>{
+    if(!confirm('삭제하면 이 수신자의 발송 내역도 함께 사라집니다.\n받지 않게만 하려면 「알림 받는 중」을 끄세요.\n\n삭제할까요?')) return;
+    try{ await rpc('admin_delete_target',{p_id:t.id}); bd.remove(); renderTargets(); }
+    catch(e){ q('#t_msg').innerHTML=`<div class="err">삭제 실패: ${esc(e.message)}</div>`; } };
+  bd.querySelector('[data-save]').onclick=async()=>{
+    const events=[...bd.querySelectorAll('[data-ev]')].filter(c=>c.checked).map(c=>c.dataset.ev);
+    if(!q('#t_name').value.trim()){ q('#t_msg').innerHTML='<div class="err">이름을 입력해 주세요.</div>'; return; }
+    if(!events.length){ q('#t_msg').innerHTML='<div class="err">받을 알림을 하나 이상 고르세요.</div>'; return; }
+    const s=scope.value;
+    try{
+      await rpc('admin_save_target',{ p_id:t.id||null,
+        p_name:q('#t_name').value.trim(), p_role:s==='all'?'internal':q('#t_role').value,
+        p_channel:q('#t_chan').value, p_address:q('#t_addr').value.trim(),
+        p_events:events, p_active:q('#t_active').checked,
+        p_org_code: s==='org'?pickedOrg(bd,'t'):null,
+        p_location_id: s==='loc'?q('#t_loc').value:null });
+      bd.remove(); renderTargets();
+    }catch(e){ q('#t_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
+  };
+}
+
+async function renderNotifyLog(){
+  mountShell();
+  const body=document.getElementById('body');
+  body.innerHTML='<div class="muted">불러오는 중…</div>';
+  let rows=[];
+  try{ rows=await rpc('admin_notification_log',{p_limit:200}); }
+  catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  const st=r=>r.sent_at?`<span class="badge b-g">발송</span>`
+    :r.attempts>=5?`<span class="badge b-r">포기</span>`
+    :`<span class="badge b-a">대기</span>`;
+  const tr=rows.map(r=>`<tr><td class="muted">${esc(fmtDateTime(r.created_at))}</td>
+    <td>${esc(r.subject)}</td><td>${esc(r.target_name)}</td>
+    <td>${esc(T_CHAN[r.channel]||r.channel)}</td>
+    <td>${r.urgent?'<span class="badge b-r">긴급</span>':''}</td>
+    <td class="muted">${esc(r.sent_at?fmtDateTime(r.sent_at):'도착 예정 '+fmtDateTime(r.not_before))}</td>
+    <td>${st(r)}</td><td class="muted">${esc(r.error||'')}</td></tr>`).join('');
+  body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0">발송 내역</h2><button class="btn line sm" id="back">← 수신자</button></div>
+    <div class="tcard"><div class="tscroll"><table>
+      <thead><tr><th>생성</th><th>제목</th><th>수신자</th><th>채널</th><th></th><th>발송·예정</th><th>상태</th><th>오류</th></tr></thead>
+      <tbody>${tr||'<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">발송 내역이 없습니다.</td></tr>'}</tbody>
+    </table></div></div>`;
+  document.getElementById('back').onclick=renderTargets;
+}
 
 // ── 화장실 추가 ──
 function orgOptions(){return state.orgs.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');}
