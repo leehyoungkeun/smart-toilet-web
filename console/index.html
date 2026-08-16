@@ -84,6 +84,8 @@
   .ov { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
   .frow input[type=date] { width:150px; }
   .frow #region, .frow #sigungu { width:170px; }
+  .fsec{ font-size:14px; font-weight:700; color:#2B3A57; margin:18px 0 8px; padding-bottom:6px; border-bottom:1px solid #E5E9F2; }
+  .fsec .req{ font-size:11px; font-weight:600; color:#B5730A; background:#FCEFD6; border-radius:4px; padding:1px 6px; margin-left:6px; }
 </style>
 </head>
 <body>
@@ -222,7 +224,7 @@ function renderTable(){
     return `<tr${l.deleted?' style="opacity:.6"':''}>
       <td class="muted">${(state.page-1)*ps+i+1}</td>
       <td><code>${esc(l.code)}</code></td>
-      <td><span class="lnk" data-id="${l.id}">${esc(l.name)}</span></td>
+      <td><span class="lnk" data-id="${l.id}">${esc(l.name)}</span>${l.deleted||l.info_ok?'':' <span class="badge b-a" title="상세 위치·관리기관·연락처·운영시간이 비어 있어 키오스크 이용 안내에 나오지 않습니다">정보 미완성</span>'}</td>
       <td>${esc(l.org_name||'')}</td>
       <td class="muted">${esc([l.sido,l.sigungu].filter(Boolean).join(' '))}</td>
       <td><span class="badge ${st.c}">${st.l}</span></td>
@@ -404,6 +406,7 @@ function openEdit(l){
       <div><label class="f">재고 (최대 ${l.pad_cap??30})</label><input id="e_stock" type="number" value="${l.pad_qty??0}"/></div>
       <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
     </div>
+    <div id="e_info"><div class="muted" style="margin-top:14px">이용 안내 정보 불러오는 중…</div></div>
     <label class="f" style="margin-top:14px;display:block">설치된 센서</label>
     <div id="e_sensors" style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
       ${SENSOR_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
@@ -427,10 +430,13 @@ function openEdit(l){
   wireRegion(bd,'e');
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
   // 현재 센서 구성을 읽어 체크 상태를 맞춘다. 실패해도 나머지 수정은 가능해야 하므로 조용히 넘어간다.
-  supabase.from('location_settings').select('sensors,features').eq('location_id',l.id).maybeSingle()
+  supabase.from('location_settings').select('sensors,features,info').eq('location_id',l.id).maybeSingle()
     .then(({data})=>{ const cs=(data&&data.sensors)||{}, cf=(data&&data.features)||{};
       bd.querySelectorAll('[data-sensor]').forEach(cb=>{ cb.checked=!!cs[cb.dataset.sensor]; });
-      bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; }); })
+      bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; });
+      const box=bd.querySelector('#e_info');
+      if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{});
+        box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; }); } })
     .catch(()=>{});
   bd.querySelector('[data-save]').onclick=async()=>{
     const q=s=>bd.querySelector(s);
@@ -445,6 +451,9 @@ function openEdit(l){
       await rpc('admin_set_sensors',{p_location_id:l.id,p_sensors:sensors});
       const features={}; bd.querySelectorAll('[data-feature]').forEach(cb=>{ if(cb.checked) features[cb.dataset.feature]=true; });
       await rpc('admin_set_features',{p_location_id:l.id,p_features:features});
+      // 이용 안내는 불러오기가 끝난 뒤에만 저장한다. 아직 그려지지 않았는데
+      // 저장하면 빈 값으로 덮어써 버린다.
+      if(bd.querySelector('#m_detail')) await rpc('admin_set_info',{p_location_id:l.id,p_info:readInfo(bd,'m')});
       bd.remove(); renderDashboard();
     }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
@@ -487,6 +496,67 @@ function wireRegion(root,id){
 }
 // 선택된 기초 기관 코드. 이것 하나만 서버로 보내면 시도·시군구가 따라온다.
 function pickedOrg(root,id){ return root.querySelector(`#${id}_sgg`).value||null; }
+
+// ── 이용 안내 정보 ──
+// 키오스크 '이용 안내' 화면에 그대로 나가는 값들. 예전에는 코드에 박혀 있어
+// 모든 기기가 '○○구청 공원녹지과 / 031-000-0000' 을 보여줬다. 시민이 민원을
+// 넣으려고 그 번호로 전화를 건다.
+const TOILET_TYPE={separate:'남녀 분리',unisex:'남녀 공용',female:'여성 전용',male:'남성 전용'};
+const AMENITIES=[['diaper','기저귀 교환대'],['powder','파우더룸'],['nursing','수유실'],
+  ['hotwater','온수 세면대'],['child','유아용 변기']];
+
+function infoFields(p,i){
+  i=i||{}; const h=i.hours||{}, st=i.stalls||{}, ds=i.dispense||{}, am=i.amenities||[];
+  const num=(id,lab,v)=>`<div><label class="f">${lab}</label><input id="${p}_${id}" type="number" min="0" value="${v==null?'':esc(String(v))}"/></div>`;
+  return `<div class="fsec">기본 정보 <span class="req">필수</span></div>
+    <div class="grid2">
+      <div><label class="f">상세 위치</label><input id="${p}_detail" value="${esc(i.detail||'')}" placeholder="중앙근린공원 동측 광장"/></div>
+      <div><label class="f">관리기관</label><input id="${p}_agency" value="${esc(i.agency||'')}" placeholder="수원시 공원녹지과"/></div>
+      <div><label class="f">연락처</label><input id="${p}_phone" value="${esc(i.phone||'')}" placeholder="031-000-0000"/></div>
+      <div><label class="f">운영시간</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="${p}_open" type="time" value="${esc(h.open||'')}" style="flex:1"/>
+          <span class="muted">~</span>
+          <input id="${p}_close" type="time" value="${esc(h.close||'')}" style="flex:1"/>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px">
+          <input type="checkbox" id="${p}_allday" style="width:auto" ${h.allday?'checked':''}/> 24시간 운영</label>
+      </div>
+    </div>
+    <div class="fsec">시설 규모</div>
+    <div class="grid2">
+      <div><label class="f">화장실 유형</label><select id="${p}_type">
+        ${Object.entries(TOILET_TYPE).map(([k,v])=>`<option value="${k}" ${i.type===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      ${num('acc','장애인 겸용 (칸)',st.accessible)}
+      ${num('mt','남성 대변기',st.m_toilet)}
+      ${num('mu','남성 소변기',st.m_urinal)}
+      ${num('ft','여성 대변기',st.f_toilet)}
+    </div>
+    <label class="f" style="margin-top:12px;display:block">편의시설</label>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0">
+      ${AMENITIES.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
+        <input type="checkbox" data-am="${k}" style="width:auto" ${am.includes(k)?'checked':''}/> ${lab}</label>`).join('')}
+    </div>
+    <div class="fsec">무상 생리용품 안내</div>
+    <div class="grid2">
+      <div><label class="f">지급 방식</label><input id="${p}_method" value="${esc(ds.method||'QR 인증 후 무료')}"/></div>
+      <div><label class="f">제공 횟수</label><input id="${p}_limit" value="${esc(ds.limit||'1일 1회')}"/></div>
+    </div>`;
+}
+
+function readInfo(root,p){
+  const q=id=>root.querySelector(`#${p}_${id}`);
+  const v=id=>{const e=q(id);return e?e.value.trim():'';};
+  const n=id=>{const e=q(id);return e&&e.value!==''?parseInt(e.value,10):null;};
+  return { detail:v('detail')||null, agency:v('agency')||null, phone:v('phone')||null,
+    hours:{open:v('open')||null,close:v('close')||null,allday:!!q('allday')?.checked},
+    type:v('type')||null,
+    stalls:{m_toilet:n('mt'),m_urinal:n('mu'),f_toilet:n('ft'),accessible:n('acc')},
+    amenities:[...root.querySelectorAll('[data-am]')].filter(c=>c.checked).map(c=>c.dataset.am),
+    dispense:{method:v('method')||null,limit:v('limit')||null} };
+}
+// 필수(A그룹)가 채워졌나 — 서버 info_complete() 와 같은 기준
+function infoOk(i){ return !!(i.detail && i.agency && i.phone && (i.hours.allday || i.hours.open)); }
 
 // ── 알림 수신자 ──
 // 담당자는 인사이동으로 바뀌고 위탁업체는 계약 단위로 갈린다. DB 를 직접
@@ -655,9 +725,28 @@ function renderAdd(){
         <div><label class="f">이름</label><input id="name" placeholder="광교호수공원 공중화장실"/></div>
         <div><label class="f">코드(고유)</label><input id="code" placeholder="자동 생성"/>
           <div style="font-size:12px;color:#6B7A95;margin-top:4px" id="codehint">비우면 자동으로 매겨집니다</div></div>
-        <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
         <div><label class="f">단말 라벨(선택)</label><input id="dlabel" placeholder="입구 키오스크"/></div>
-      </div><div id="msg" style="margin:8px 0"></div>
+      </div>
+      ${infoFields('n',null)}
+      <div class="fsec">설치된 센서</div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0">
+        ${SENSOR_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
+          <input type="checkbox" data-sensor="${k}" style="width:auto"/> ${lab}</label>`).join('')}
+      </div>
+      <div style="font-size:12px;color:#6B7A95">센서가 없는데 켜 두면 값 0 이 &ldquo;좋음&rdquo; 으로 표시됩니다.</div>
+      <div class="fsec">설치된 안전시설·기능</div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0">
+        ${FEATURE_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
+          <input type="checkbox" data-feature="${k}" style="width:auto" ${k==='dispenser'?'checked':''}/> ${lab}</label>`).join('')}
+      </div>
+      <div style="font-size:12px;color:#C0392B">설치되지 않은 것을 켜 두면 시민이 위급 상황에서 없는 기능을 믿게 됩니다.</div>
+      <div class="fsec">재고</div>
+      <div class="grid2">
+        <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
+        <div><label class="f">최대 용량</label><input id="cap" type="number" value="30"/></div>
+        <div><label class="f">부족 알림 임계값 (%)</label><input id="lowpct" type="number" value="20" min="0" max="100"/></div>
+      </div>
+      <div id="msg" style="margin:12px 0"></div>
       <button class="btn" id="save">등록하고 페어링 코드 받기</button></div>`;
     wireRegion(pane,'a');
     // 지역을 고르면 그 지자체의 다음 코드를 미리 보여준다. 무엇이 발급될지
@@ -678,9 +767,20 @@ function renderAdd(){
       if(!p_name){msg.innerHTML='<div class="err">이름을 입력해 주세요.</div>';return;}
       const org=pickedOrg(pane,'a');
       if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
-      try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,p_device_label:q('dlabel').value.trim()||null,p_stock:parseInt(q('stock').value||'0',10)});
+      const info=readInfo(pane,'n');
+      // 시민에게 보이는 값이라 막는다. 여기서 통과시키면 키오스크에 빈 칸이
+      // 나가고, 그것을 나중에 채우는 일은 대개 일어나지 않는다.
+      if(!infoOk(info)){ msg.innerHTML='<div class="err">상세 위치·관리기관·연락처·운영시간은 필수입니다. (24시간 운영이면 체크)</div>'; return; }
+      const sensors={}; pane.querySelectorAll('[data-sensor]').forEach(c=>{ if(c.checked) sensors[c.dataset.sensor]=true; });
+      const features={}; pane.querySelectorAll('[data-feature]').forEach(c=>{ if(c.checked) features[c.dataset.feature]=true; });
+      try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,
+          p_device_label:q('dlabel').value.trim()||null,
+          p_stock:parseInt(q('stock').value||'0',10),
+          p_capacity:parseInt(q('cap').value||'30',10),
+          p_sensors:sensors, p_features:features, p_info:info,
+          p_alert_low_pct:parseInt(q('lowpct').value||'20',10)});
         msg.innerHTML=`<div class="ok">등록 완료 — <code>${esc(res.code)}</code> · 페어링 코드 <code>${esc(res.pairing_code)}</code></div>`;
-        q('code').value='';q('name').value=''; showNext();
+        q('code').value='';q('name').value=''; pane.querySelector('#n_detail').value=''; showNext();
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
   }
