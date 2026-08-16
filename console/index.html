@@ -90,6 +90,9 @@
 </head>
 <body>
 <div id="app"></div>
+<!-- 엑셀 읽기·쓰기 (SheetJS, Apache-2.0). 폐쇄망 대비로 CDN 대신 내장한다.
+     구형 xls/ods 를 뺀 판이라 245KB — .xlsx 만 다루면 충분하다. -->
+<script src="./xlsx.js"></script>
 <script type="module">
 import { createClient } from './supabase.js';
 const SUPABASE_URL='https://jrcvrlyvkdoxtjlhmapm.supabase.co';
@@ -601,6 +604,117 @@ function readAddr(root,p){ const e=root.querySelector(`#${p}_addr`); return e?e.
 // 필수(A그룹)가 채워졌나 — 서버 info_complete() 와 같은 기준
 function infoOk(i,addr){ return !!(addr && i.agency && i.phone && (i.hours.allday || i.hours.open)); }
 
+// ── 엑셀 일괄 등록 ──
+// 지자체는 화장실 목록을 원래 엑셀로 관리한다. 이름·재고만 받으면 100곳이
+// 전부 '정보 미완성' 이 되고, 주소·관리기관을 한 곳씩 100번 열어 채워야
+// 한다. 실제로는 아무도 그렇게 하지 않는다 — 방치되고 키오스크가 빈 안내를
+// 띄운다. 한 장에 다 담아 올리게 한다.
+const XL_COLS=[
+  ['sido','시도',1],['sigungu','시군구',1],['name','이름',1],['address','주소',1],
+  ['agency','관리기관',1],['phone','연락처',1],
+  ['open','운영시작'],['close','운영종료'],['allday','24시간'],
+  ['type','화장실유형'],['m_toilet','남성대변기'],['m_urinal','남성소변기'],
+  ['f_toilet','여성대변기'],['accessible','장애인겸용'],['amenities','편의시설'],
+  ['sensors','센서'],['features','안전시설'],
+  ['stock','초기재고'],['capacity','최대용량'],['alert_low_pct','부족알림%'],
+  ['limit_period','제공주기'],['limit_count','제공횟수'],['limit_scope','횟수범위'],
+  ['device_label','단말라벨'],
+];
+const XL_EXAMPLE=['경기도','수원시','광교호수공원 공중화장실','경기도 수원시 영통구 광교호수공원로 300',
+  '수원시 공원녹지과','031-000-0000','05:00','24:00','아니오','남녀 분리',4,3,6,1,
+  '기저귀 교환대, 파우더룸','온도, 습도','디지털 이상음 감지, 생리용품 배출기',
+  20,30,20,'1일',1,'전체 화장실 통합','입구 키오스크'];
+
+// 셀에는 사람이 읽는 한글 라벨이 들어간다. 키로 바꿔 넣되, 모르는 값은
+// 조용히 버리지 않고 그 행의 오류로 알린다.
+function labelsToKeys(cell,table,what,errs){
+  if(cell==null||String(cell).trim()==='') return {};
+  const out={};
+  String(cell).split(/[,;·\/]/).map(s=>s.trim()).filter(Boolean).forEach(lab=>{
+    const hit=table.find(([,l])=>l===lab);
+    if(hit) out[hit[0]]=true; else errs.push(`${what} "${lab}" 를 알 수 없습니다`);
+  });
+  return out;
+}
+function timeCell(v){
+  if(v==null||v==='') return null;
+  if(typeof v==='number'){ // 엑셀이 시각을 0~1 소수로 준다
+    const m=Math.round(v*24*60), p=x=>String(x).padStart(2,'0');
+    return `${p(Math.floor(m/60)%24)}:${p(m%60)}`;
+  }
+  const s=String(v).trim(); const m=s.match(/^(\d{1,2})\s*[:시]\s*(\d{1,2})?/);
+  return m?`${String(m[1]).padStart(2,'0')}:${(m[2]||'00').padStart(2,'0')}`:s;
+}
+const YES=v=>['예','y','yes','true','1','o','ㅇ'].includes(String(v??'').trim().toLowerCase());
+
+function parseSheet(rows){
+  const out=[];
+  rows.forEach((raw,idx)=>{
+    const errs=[]; const g=k=>raw[(XL_COLS.find(c=>c[0]===k)||[])[1]];
+    const name=String(g('name')??'').trim();
+    if(!name && !String(g('sido')??'').trim()) return;   // 빈 줄
+    XL_COLS.filter(c=>c[2]).forEach(([k,lab])=>{
+      if(String(g(k)??'').trim()==='') errs.push(`${lab} 이(가) 비었습니다`);
+    });
+    const allday=YES(g('allday'));
+    const open=timeCell(g('open')), close=timeCell(g('close'));
+    if(!allday && !open) errs.push('운영시작 또는 24시간 중 하나는 있어야 합니다');
+    const typeLab=String(g('type')??'').trim();
+    const type=(Object.entries(TOILET_TYPE).find(([,v])=>v===typeLab)||[])[0];
+    if(typeLab && !type) errs.push(`화장실유형 "${typeLab}" 를 알 수 없습니다`);
+    const periodLab=String(g('limit_period')??'').trim();
+    const period=(Object.entries(LIMIT_PERIOD).find(([,v])=>v===periodLab)||[])[0];
+    if(periodLab && !period) errs.push(`제공주기 "${periodLab}" 를 알 수 없습니다`);
+    const scopeLab=String(g('limit_scope')??'').trim();
+    const scope=(Object.entries(LIMIT_SCOPE).find(([,v])=>v===scopeLab)||[])[0];
+    if(scopeLab && !scope) errs.push(`횟수범위 "${scopeLab}" 를 알 수 없습니다`);
+    const num=k=>{const v=g(k); return (v==null||v==='')?null:(isNaN(+v)?null:+v);};
+    const am=labelsToKeys(g('amenities'),AMENITIES,'편의시설',errs);
+    const sen=labelsToKeys(g('sensors'),SENSOR_KEYS,'센서',errs);
+    const fea=labelsToKeys(g('features'),FEATURE_KEYS,'안전시설',errs);
+    // 지역은 서버가 정식 목록과 대조한다. 여기서는 비었는지만 본다.
+    out.push({ _row:idx+2, _errs:errs, name,
+      sido:String(g('sido')??'').trim(), sigungu:String(g('sigungu')??'').trim(),
+      address:String(g('address')??'').trim(),
+      device_label:String(g('device_label')??'').trim()||null,
+      stock:num('stock')??0, capacity:num('capacity'), alert_low_pct:num('alert_low_pct'),
+      sensors:sen, features:fea,
+      info:{ agency:String(g('agency')??'').trim()||null,
+             phone:String(g('phone')??'').trim()||null,
+             hours:{open:allday?null:open,close:allday?null:close,allday},
+             type:type||'separate',
+             stalls:{m_toilet:num('m_toilet'),m_urinal:num('m_urinal'),
+                     f_toilet:num('f_toilet'),accessible:num('accessible')},
+             amenities:Object.keys(am),
+             dispense:{method:'QR 인증 후 무료',
+                       limit_count:num('limit_count')==null?1:num('limit_count'),
+                       limit_period:period||'day', limit_scope:scope||'all'} } });
+  });
+  return out;
+}
+
+async function downloadTemplate(){
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet([XL_COLS.map(c=>c[1]), XL_EXAMPLE]);
+  ws['!cols']=XL_COLS.map(c=>({wch:Math.max(10,c[1].length*2+2)}));
+  XLSX.utils.book_append_sheet(wb,ws,'화장실');
+  // 시·군·구를 손으로 적으면 또 틀린다(고성시·수원시 사례). 정식 목록을
+  // 함께 실어 붙여넣게 한다.
+  let regions=[];
+  try{ regions=await rpc('region_list'); }catch(e){}
+  const ref=[['시도','시군구'],...regions.map(r=>[r.sido,r.sigungu||''])];
+  ref.push([],['화장실유형',Object.values(TOILET_TYPE).join(' / ')]);
+  ref.push(['편의시설',AMENITIES.map(a=>a[1]).join(' / ')]);
+  ref.push(['센서',SENSOR_KEYS.map(a=>a[1]).join(' / ')]);
+  ref.push(['안전시설',FEATURE_KEYS.map(a=>a[1]).join(' / ')]);
+  ref.push(['제공주기',Object.values(LIMIT_PERIOD).join(' / ')]);
+  ref.push(['횟수범위',Object.values(LIMIT_SCOPE).join(' / ')]);
+  ref.push(['24시간','예 / 아니오']);
+  const ws2=XLSX.utils.aoa_to_sheet(ref); ws2['!cols']=[{wch:20},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws2,'입력값 참고');
+  XLSX.writeFile(wb,'화장실_일괄등록_양식.xlsx');
+}
+
 // ── 알림 수신자 ──
 // 담당자는 인사이동으로 바뀌고 위탁업체는 계약 단위로 갈린다. DB 를 직접
 // 고치는 방식으로는 운영이 안 된다.
@@ -830,34 +944,71 @@ function renderAdd(){
   }
   function many(){
     const pane=document.getElementById('pane');
+    let parsed=[];
     pane.innerHTML=`<div class="card pad">
-      <label class="f">지역(전체 적용)</label>
-      <div class="grid2" style="max-width:520px">${regionPicker('b')}</div>
-      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>이름,재고</code></label>
-      <textarea id="csv" placeholder="매산로 공중화장실,20
-행궁동 공중화장실,15"></textarea>
-      <div style="font-size:12px;color:#6B7A95;margin-top:4px">
-        코드는 자동으로 매겨집니다. 지역은 위에서 고른 것이 모든 행에 적용되니, 시·군·구가 다르면 나눠서 등록하세요.<br>
-        같은 지자체에 <b>같은 이름</b>이 이미 있으면 중복으로 건너뜁니다 — 실수로 두 번 붙여넣어도 두 배로 등록되지 않습니다.
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn line" id="tpl">① 엑셀 양식 내려받기</button>
+        <span class="muted">→ 채운 뒤 →</span>
+        <label class="btn" style="cursor:pointer;margin:0">② 엑셀 파일 선택
+          <input type="file" id="xf" accept=".xlsx,.xls" style="display:none"/></label>
+        <span class="muted" id="fname"></span>
       </div>
-      <div id="msg" style="margin:8px 0"></div><button class="btn" id="run">일괄 등록</button>
+      <div style="font-size:12px;color:#6B7A95;margin-top:10px">
+        양식의 <b>입력값 참고</b> 시트에 전국 시·군·구 정식 목록과 고를 수 있는 값이 들어 있습니다. 그대로 붙여넣으세요.<br>
+        코드는 자동으로 매겨집니다. 시·군·구가 행마다 달라도 됩니다.
+        같은 지자체에 <b>같은 이름</b>이 있으면 중복으로 건너뜁니다 — 실수로 두 번 올려도 두 배가 되지 않습니다.
+      </div>
+      <div id="msg" style="margin:12px 0"></div>
+      <div id="preview"></div>
       <div id="result" style="margin-top:14px"></div></div>`;
-    wireRegion(pane,'b');
-    document.getElementById('run').onclick=async()=>{
-      const msg=document.getElementById('msg'); const org=pickedOrg(pane,'b');
-      if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
-      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,name:c[0],stock:c[1]||'0'};}).filter(r=>r.name);
-      if(!rows.length){msg.innerHTML='<div class="err">추가할 행이 없습니다.</div>';return;}
-      if(rows.length>500){msg.innerHTML='<div class="err">한 번에 500개 이하로 나눠 주세요.</div>';return;}
-      msg.innerHTML=`<div class="muted">${rows.length}개 처리 중…</div>`;
+    const msg=pane.querySelector('#msg');
+    pane.querySelector('#tpl').onclick=()=>downloadTemplate().catch(e=>{
+      msg.innerHTML=`<div class="err">양식 생성 실패: ${esc(e.message)}</div>`; });
+
+    pane.querySelector('#xf').onchange=async(e)=>{
+      const f=e.target.files&&e.target.files[0]; if(!f) return;
+      pane.querySelector('#fname').textContent=f.name;
+      pane.querySelector('#result').innerHTML='';
+      try{
+        const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+        const sh=wb.Sheets[wb.SheetNames[0]];
+        parsed=parseSheet(XLSX.utils.sheet_to_json(sh,{defval:''}));
+      }catch(err){ msg.innerHTML=`<div class="err">파일을 읽지 못했습니다: ${esc(err.message)}</div>`; return; }
+      if(!parsed.length){ msg.innerHTML='<div class="err">첫 시트에서 읽을 행이 없습니다. 양식의 열 이름을 그대로 두세요.</div>'; return; }
+      const bad=parsed.filter(r=>r._errs.length);
+      // 오류 행을 빼고 올린다. 100행 중 1행 오타로 전부 막으면 결국 검증을
+      // 피해 가는 방법을 찾는다. 대신 무엇이 빠지는지 분명히 보여준다.
+      msg.innerHTML=`<div class="${bad.length?'err':'ok'}">읽은 행 ${parsed.length} · 등록 가능 ${parsed.length-bad.length}`
+        + (bad.length?` · <b>오류 ${bad.length}행은 제외됩니다</b>`:'')+`</div>`;
+      const rows=parsed.slice(0,200).map(r=>`<tr${r._errs.length?' style="background:#FDF3F3"':''}>
+        <td class="muted">${r._row}</td><td>${esc(r.name||'-')}</td>
+        <td class="muted">${esc([r.sido,r.sigungu].filter(Boolean).join(' ')||'-')}</td>
+        <td class="muted">${esc(r.address||'-')}</td>
+        <td class="muted">${esc(r.info.agency||'-')}</td>
+        <td>${r._errs.length?`<span class="badge b-r">오류</span> <span class="muted">${esc(r._errs.join(' · '))}</span>`:'<span class="badge b-g">확인</span>'}</td></tr>`).join('');
+      pane.querySelector('#preview').innerHTML=`<div class="tcard tscroll" style="max-height:340px">
+        <table><thead><tr><th>행</th><th>이름</th><th>지역</th><th>주소</th><th>관리기관</th><th>확인</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+        ${parsed.length>200?'<div class="muted" style="font-size:12px;margin-top:6px">미리보기는 200행까지만 표시합니다. 등록은 전부 진행됩니다.</div>':''}
+        <button class="btn" id="run" style="margin-top:12px" ${parsed.length-bad.length?'':'disabled'}>
+          ${parsed.length-bad.length}곳 등록하기</button>`;
+      pane.querySelector('#run').onclick=doUpload;
+    };
+
+    async function doUpload(){
+      const rows=parsed.filter(r=>!r._errs.length).map(r=>{const{_row,_errs,...rest}=r; return rest;});
+      if(!rows.length){msg.innerHTML='<div class="err">등록할 행이 없습니다.</div>';return;}
+      if(rows.length>500){msg.innerHTML='<div class="err">한 번에 500곳 이하로 나눠 주세요.</div>';return;}
+      msg.innerHTML=`<div class="muted">${rows.length}곳 처리 중…</div>`;
       try{const res=await rpc('admin_bulk_create_locations',{p_rows:rows});
         const ok=res.filter(r=>r.status==='ok').length,dup=res.filter(r=>r.status==='duplicate').length,er=res.filter(r=>r.status==='error').length;
         msg.innerHTML=`<div class="ok">완료: 성공 ${ok} · 중복 ${dup} · 오류 ${er}</div>`;
-        const b=res.map(r=>`<tr><td>${esc(r.code)}</td><td>${r.pairing_code?`<code>${esc(r.pairing_code)}</code>`:'-'}</td><td>${r.status==='ok'?'<span class="badge b-g">성공</span>':r.status==='duplicate'?'<span class="badge b-a">중복</span>':`<span class="badge b-r">오류</span> <span class="muted">${esc(r.message||'')}</span>`}</td></tr>`).join('');
-        document.getElementById('result').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0"><b>결과</b><button class="btn sm line" id="dl">페어링 코드 CSV</button></div><div class="tcard tscroll"><table><thead><tr><th>발급된 코드</th><th>페어링코드</th><th>상태</th></tr></thead><tbody>${b}</tbody></table></div>`;
-        document.getElementById('dl').onclick=()=>download('pairing-codes.csv','code,pairing_code,status\n'+res.map(r=>`${r.code},${r.pairing_code||''},${r.status}`).join('\n'));
+        const b=res.map(r=>`<tr><td>${esc(r.code)}</td><td class="muted">${esc(r.name||'')}</td><td>${r.pairing_code?`<code>${esc(r.pairing_code)}</code>`:'-'}</td><td>${r.status==='ok'?'<span class="badge b-g">성공</span>':r.status==='duplicate'?'<span class="badge b-a">중복</span>':`<span class="badge b-r">오류</span> <span class="muted">${esc(r.message||'')}</span>`}</td></tr>`).join('');
+        document.getElementById('result').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0"><b>결과</b><button class="btn sm line" id="dl">페어링 코드 CSV</button></div><div class="tcard tscroll"><table><thead><tr><th>발급된 코드</th><th>이름</th><th>페어링코드</th><th>상태</th></tr></thead><tbody>${b}</tbody></table></div>`;
+        document.getElementById('dl').onclick=()=>download('pairing-codes.csv','code,name,pairing_code,status\n'+res.map(r=>`${r.code},${r.name||''},${r.pairing_code||''},${r.status}`).join('\n'));
+        pane.querySelector('#preview').innerHTML=''; parsed=[];
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
-    };
+    }
   }
 }
 
