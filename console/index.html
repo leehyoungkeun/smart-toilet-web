@@ -375,6 +375,9 @@ function overviewHtml(l,admin){
       ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
       ${row('등록일',fmtDate(l.created_at))}
     </div>
+    <!-- 설정은 따로 조회한다. 목록 RPC 에 다 실으면 화장실 수백 개를 부를
+         때마다 쓰지도 않는 jsonb 를 함께 끌고 온다. -->
+    <div id="ovset"><div class="muted" style="margin-top:14px">상세 정보 불러오는 중…</div></div>
     ${admin?`<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
       ${l.deleted?`<button class="btn" data-restore>복원</button>`:`<button class="btn" data-edit>수정</button><button class="btn line" style="color:#B5730A;border-color:#F0D9AF" data-soft>삭제(보관)</button>`}
       <button class="btn line" style="color:#D25151;border-color:#F3C2C2" data-hard>완전 삭제</button>
@@ -382,8 +385,52 @@ function overviewHtml(l,admin){
       ${!l.deleted?'<button class="btn line" data-reissue>코드 재발급</button>':''}</div>`:''}
     </div>`;
 }
+// 개요에 설치 구성과 이용 안내를 함께 보여준다. 이 값들이 그대로 키오스크
+// 화면에 나가므로, 콘솔에서 확인할 수 없으면 현장에 가서야 잘못을 안다.
+function settingsHtml(l,d){
+  const i=(d&&d.info)||{}, se=(d&&d.sensors)||{}, fe=(d&&d.features)||{};
+  const h=i.hours||{}, st=i.stalls||{}, ds=i.dispense||{};
+  const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
+  const on=(map,keys)=>{ const y=keys.filter(([k])=>map[k]); return y.length
+    ? y.map(([,lab])=>`<span class="badge b-g" style="margin-right:6px">${esc(lab)}</span>`).join('')
+    : '<span class="muted">없음</span>'; };
+  const hours=h.allday?'24시간':(h.open?`${esc(h.open)} ~ ${esc(h.close||'')}`:'-');
+  const stalls=[st.m_toilet?`남 대변기 ${st.m_toilet}`:null, st.m_urinal?`남 소변기 ${st.m_urinal}`:null,
+    st.f_toilet?`여 대변기 ${st.f_toilet}`:null, st.accessible?`장애인 겸용 ${st.accessible}`:null]
+    .filter(Boolean).join(' · ') || '-';
+  const am=(i.amenities||[]).map(k=>(AMENITIES.find(a=>a[0]===k)||[,k])[1]).join(' · ')||'-';
+  const ok=infoOk({agency:i.agency,phone:i.phone,hours:h},l.address);
+  return `<div class="card pad" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <b style="font-size:15px">이용 안내 · 설치 구성</b>
+      ${ok?'<span class="badge b-g">정보 완성</span>'
+         :'<span class="badge b-a">정보 미완성 — 키오스크에 일부가 표시되지 않습니다</span>'}
+      <span class="muted" style="font-size:12px;margin-left:auto">키오스크 &lsquo;이용 안내&rsquo; 화면에 그대로 나갑니다</span>
+    </div>
+    <div class="kv">
+      ${row('관리기관',esc(i.agency||'-'))}
+      ${row('연락처',esc(i.phone||'-'))}
+      ${row('운영시간',hours)}
+      ${row('화장실 유형',esc(TOILET_TYPE[i.type]||'-'))}
+      ${row('시설 규모',esc(stalls))}
+      ${row('편의시설',esc(am))}
+      ${row('설치 센서',on(se,SENSOR_KEYS))}
+      ${row('안전시설',on(fe,FEATURE_KEYS))}
+      ${row('생리용품',fe.dispenser
+        ? `${esc(ds.method||'-')} · <b>${esc(limitText(ds))}</b> · ${esc(LIMIT_SCOPE[ds.limit_scope||'all'])}`
+        : '<span class="muted">배출기 미설치</span>')}
+      ${row('재고 부족 알림',(d&&d.alert_low_pct!=null)?`용량의 ${d.alert_low_pct}% 이하`:'-')}
+    </div></div>`;
+}
 function wireOverview(l){
   const q=sel=>document.querySelector(sel);
+  // 설정을 못 읽어도 개요의 나머지는 보여야 한다.
+  supabase.from('location_settings').select('sensors,features,info,alert_low_pct')
+    .eq('location_id',l.id).maybeSingle()
+    .then(({data})=>{ const box=document.getElementById('ovset');
+      if(box) box.innerHTML=settingsHtml(l,data); })
+    .catch(()=>{ const box=document.getElementById('ovset');
+      if(box) box.innerHTML='<div class="muted" style="margin-top:14px">상세 정보를 불러오지 못했습니다.</div>'; });
   const act=async(fn,body,after)=>{ try{ await rpc(fn,body); renderDashboard(); }catch(e){ alert((after||'실패')+': '+e.message); } };
   const edit=q('[data-edit]'); if(edit) edit.onclick=()=>openEdit(l);
   const soft=q('[data-soft]'); if(soft) soft.onclick=()=>{ if(confirm(`'${l.name}'을(를) 삭제(보관) 처리할까요?`)) act('admin_soft_delete_location',{p_id:l.id},'삭제 실패'); };
