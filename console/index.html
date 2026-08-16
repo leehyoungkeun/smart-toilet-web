@@ -609,33 +609,37 @@ function infoOk(i,addr){ return !!(addr && i.agency && i.phone && (i.hours.allda
 // 전부 '정보 미완성' 이 되고, 주소·관리기관을 한 곳씩 100번 열어 채워야
 // 한다. 실제로는 아무도 그렇게 하지 않는다 — 방치되고 키오스크가 빈 안내를
 // 띄운다. 한 장에 다 담아 올리게 한다.
+// 여러 개를 고르는 항목은 한 칸에 쉼표로 적게 하지 않는다. "기저귀 교환대"
+// 를 "기저귀교환대" 로 적는 순간 그 행이 오류가 되고, 100행이면 반드시
+// 생긴다. 항목마다 칸을 따로 두고 Y/N 으로 받으면 틀릴 여지가 없다.
+const XL_YN=[
+  ...AMENITIES.map(([k,l])=>['am:'+k,'편의:'+l]),
+  ...SENSOR_KEYS.map(([k,l])=>['sen:'+k,'센서:'+l]),
+  ...FEATURE_KEYS.map(([k,l])=>['fea:'+k,'안전:'+l]),
+];
 const XL_COLS=[
   ['sido','시도',1],['sigungu','시군구',1],['name','이름',1],['address','주소',1],
   ['agency','관리기관',1],['phone','연락처',1],
-  ['open','운영시작'],['close','운영종료'],['allday','24시간'],
+  ['allday','24시간(Y/N)'],['open','운영시작'],['close','운영종료'],
   ['type','화장실유형'],['m_toilet','남성대변기'],['m_urinal','남성소변기'],
-  ['f_toilet','여성대변기'],['accessible','장애인겸용'],['amenities','편의시설'],
-  ['sensors','센서'],['features','안전시설'],
+  ['f_toilet','여성대변기'],['accessible','장애인겸용'],
+  ...XL_YN,
   ['stock','초기재고'],['capacity','최대용량'],['alert_low_pct','부족알림%'],
-  ['limit_period','제공주기'],['limit_count','제공횟수'],['limit_scope','횟수범위'],
+  ['limit_period','제공주기'],['limit_count','제공횟수'],['limit_all','횟수를전체통합(Y/N)'],
   ['device_label','단말라벨'],
 ];
-const XL_EXAMPLE=['경기도','수원시','광교호수공원 공중화장실','경기도 수원시 영통구 광교호수공원로 300',
-  '수원시 공원녹지과','031-000-0000','05:00','24:00','아니오','남녀 분리',4,3,6,1,
-  '기저귀 교환대, 파우더룸','온도, 습도','디지털 이상음 감지, 생리용품 배출기',
-  20,30,20,'1일',1,'전체 화장실 통합','입구 키오스크'];
-
-// 셀에는 사람이 읽는 한글 라벨이 들어간다. 키로 바꿔 넣되, 모르는 값은
-// 조용히 버리지 않고 그 행의 오류로 알린다.
-function labelsToKeys(cell,table,what,errs){
-  if(cell==null||String(cell).trim()==='') return {};
-  const out={};
-  String(cell).split(/[,;·\/]/).map(s=>s.trim()).filter(Boolean).forEach(lab=>{
-    const hit=table.find(([,l])=>l===lab);
-    if(hit) out[hit[0]]=true; else errs.push(`${what} "${lab}" 를 알 수 없습니다`);
-  });
-  return out;
-}
+// 예시 행 — 양식과 같은 순서로 만든다. 손으로 맞추면 어긋난다.
+const XL_EXAMPLE=(()=>{
+  const v={ sido:'경기도', sigungu:'수원시', name:'광교호수공원 공중화장실',
+    address:'경기도 수원시 영통구 광교호수공원로 300', agency:'수원시 공원녹지과',
+    phone:'031-000-0000', allday:'N', open:'05:00', close:'24:00', type:'남녀 분리',
+    m_toilet:4, m_urinal:3, f_toilet:6, accessible:1,
+    'am:diaper':'Y','am:powder':'Y','sen:temperature':'Y','sen:humidity':'Y',
+    'fea:sound_detection':'Y','fea:dispenser':'Y',
+    stock:20, capacity:30, alert_low_pct:20,
+    limit_period:'일', limit_count:1, limit_all:'Y', device_label:'입구 키오스크' };
+  return XL_COLS.map(([k])=>v[k]!==undefined?v[k]:(k.includes(':')?'N':''));
+})();
 function timeCell(v){
   if(v==null||v==='') return null;
   if(typeof v==='number'){ // 엑셀이 시각을 0~1 소수로 준다
@@ -645,7 +649,21 @@ function timeCell(v){
   const s=String(v).trim(); const m=s.match(/^(\d{1,2})\s*[:시]\s*(\d{1,2})?/);
   return m?`${String(m[1]).padStart(2,'0')}:${(m[2]||'00').padStart(2,'0')}`:s;
 }
-const YES=v=>['예','y','yes','true','1','o','ㅇ'].includes(String(v??'').trim().toLowerCase());
+// Y/N 은 사람마다 다르게 쓴다. 넓게 받되, 알 수 없는 값은 조용히 N 으로
+// 넘기지 않고 오류로 알린다 — 조용히 넘기면 안전시설이 꺼진 채 등록된다.
+const YN_Y=['y','yes','예','o','ㅇ','true','1','v','있음','설치'];
+const YN_N=['','n','no','아니오','아니요','x','false','0','-','없음','미설치'];
+function ynCell(v,label,errs){
+  const s=String(v??'').trim().toLowerCase();
+  if(YN_Y.includes(s)) return true;
+  if(YN_N.includes(s)) return false;
+  errs.push(`${label} 은 Y 또는 N 이어야 합니다 (입력값 "${String(v).trim()}")`);
+  return false;
+}
+// 한 글자 값(일/주/월)은 그대로 받고, '1일'·'매일' 같은 표기도 받아 준다.
+const PERIOD_ALIAS={'일':'day','1일':'day','매일':'day','하루':'day',
+  '주':'week','1주':'week','매주':'week','주간':'week',
+  '월':'month','1월':'month','1개월':'month','매월':'month','월간':'month'};
 
 function parseSheet(rows){
   const out=[];
@@ -656,22 +674,22 @@ function parseSheet(rows){
     XL_COLS.filter(c=>c[2]).forEach(([k,lab])=>{
       if(String(g(k)??'').trim()==='') errs.push(`${lab} 이(가) 비었습니다`);
     });
-    const allday=YES(g('allday'));
+    const allday=ynCell(g('allday'),'24시간',errs);
     const open=timeCell(g('open')), close=timeCell(g('close'));
-    if(!allday && !open) errs.push('운영시작 또는 24시간 중 하나는 있어야 합니다');
+    if(!allday && !open) errs.push('운영시작을 적거나 24시간을 Y 로 하세요');
     const typeLab=String(g('type')??'').trim();
     const type=(Object.entries(TOILET_TYPE).find(([,v])=>v===typeLab)||[])[0];
     if(typeLab && !type) errs.push(`화장실유형 "${typeLab}" 를 알 수 없습니다`);
     const periodLab=String(g('limit_period')??'').trim();
-    const period=(Object.entries(LIMIT_PERIOD).find(([,v])=>v===periodLab)||[])[0];
-    if(periodLab && !period) errs.push(`제공주기 "${periodLab}" 를 알 수 없습니다`);
-    const scopeLab=String(g('limit_scope')??'').trim();
-    const scope=(Object.entries(LIMIT_SCOPE).find(([,v])=>v===scopeLab)||[])[0];
-    if(scopeLab && !scope) errs.push(`횟수범위 "${scopeLab}" 를 알 수 없습니다`);
+    const period=periodLab?PERIOD_ALIAS[periodLab]:'day';
+    if(periodLab && !period) errs.push(`제공주기 "${periodLab}" 는 일·주·월 중 하나여야 합니다`);
+    const scope=ynCell(g('limit_all'),'횟수를전체통합',errs)?'all':'location';
     const num=k=>{const v=g(k); return (v==null||v==='')?null:(isNaN(+v)?null:+v);};
-    const am=labelsToKeys(g('amenities'),AMENITIES,'편의시설',errs);
-    const sen=labelsToKeys(g('sensors'),SENSOR_KEYS,'센서',errs);
-    const fea=labelsToKeys(g('features'),FEATURE_KEYS,'안전시설',errs);
+    const pick=(prefix)=>{const o={};
+      XL_YN.filter(([k])=>k.startsWith(prefix)).forEach(([k,lab])=>{
+        if(ynCell(g(k),lab,errs)) o[k.slice(prefix.length)]=true; });
+      return o;};
+    const am=pick('am:'), sen=pick('sen:'), fea=pick('fea:');
     // 지역은 서버가 정식 목록과 대조한다. 여기서는 비었는지만 본다.
     out.push({ _row:idx+2, _errs:errs, name,
       sido:String(g('sido')??'').trim(), sigungu:String(g('sigungu')??'').trim(),
@@ -702,15 +720,15 @@ async function downloadTemplate(){
   // 함께 실어 붙여넣게 한다.
   let regions=[];
   try{ regions=await rpc('region_list'); }catch(e){}
-  const ref=[['시도','시군구'],...regions.map(r=>[r.sido,r.sigungu||''])];
-  ref.push([],['화장실유형',Object.values(TOILET_TYPE).join(' / ')]);
-  ref.push(['편의시설',AMENITIES.map(a=>a[1]).join(' / ')]);
-  ref.push(['센서',SENSOR_KEYS.map(a=>a[1]).join(' / ')]);
-  ref.push(['안전시설',FEATURE_KEYS.map(a=>a[1]).join(' / ')]);
-  ref.push(['제공주기',Object.values(LIMIT_PERIOD).join(' / ')]);
-  ref.push(['횟수범위',Object.values(LIMIT_SCOPE).join(' / ')]);
-  ref.push(['24시간','예 / 아니오']);
-  const ws2=XLSX.utils.aoa_to_sheet(ref); ws2['!cols']=[{wch:20},{wch:40}];
+  // 값을 골라 적어야 하는 칸은 셋뿐이다. 나머지는 전부 Y/N 이라 틀릴 수 없다.
+  const ref=[['항목','적을 수 있는 값'],
+    ['Y/N 칸','Y 또는 N  (비우면 N)'],
+    ['화장실유형',Object.values(TOILET_TYPE).join(' / ')],
+    ['제공주기','일 / 주 / 월'],
+    ['운영시작·운영종료','05:00 형식. 24시간 칸이 Y 면 비워도 됩니다'],
+    [],['시도','시군구  ← 아래 목록에서 그대로 복사해 쓰세요'],
+    ...regions.map(r=>[r.sido,r.sigungu||''])];
+  const ws2=XLSX.utils.aoa_to_sheet(ref); ws2['!cols']=[{wch:22},{wch:46}];
   XLSX.utils.book_append_sheet(wb,ws2,'입력값 참고');
   XLSX.writeFile(wb,'화장실_일괄등록_양식.xlsx');
 }
@@ -870,7 +888,7 @@ function renderAdd(){
   mountShell();
   const body=document.getElementById('body');
   body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h2 style="margin:0">화장실 등록</h2><button class="btn line sm" id="back">← 목록</button></div>
-    <div class="tabs"><div class="tab active" data-t="one">단일 등록</div><div class="tab" data-t="many">여러 개 (50~100)</div></div><div id="pane"></div>`;
+    <div class="tabs"><div class="tab active" data-t="one">화면에서 입력</div><div class="tab" data-t="many">엑셀로 등록</div></div><div id="pane"></div>`;
   document.getElementById('back').onclick=renderDashboard;
   body.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{body.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');t.dataset.t==='one'?one():many();});
   one();
@@ -954,7 +972,9 @@ function renderAdd(){
         <span class="muted" id="fname"></span>
       </div>
       <div style="font-size:12px;color:#6B7A95;margin-top:10px">
-        양식의 <b>입력값 참고</b> 시트에 전국 시·군·구 정식 목록과 고를 수 있는 값이 들어 있습니다. 그대로 붙여넣으세요.<br>
+        <b>한 곳만 등록해도 됩니다.</b> 개수 제한은 한 번에 500곳까지입니다.<br>
+        센서·안전시설·편의시설은 칸마다 <b>Y 또는 N</b> 만 적습니다. 비우면 N 입니다.
+        값을 골라 적는 칸은 화장실유형·제공주기 둘뿐이고, 시·군·구는 <b>입력값 참고</b> 시트에서 복사해 쓰세요.<br>
         코드는 자동으로 매겨집니다. 시·군·구가 행마다 달라도 됩니다.
         같은 지자체에 <b>같은 이름</b>이 있으면 중복으로 건너뜁니다 — 실수로 두 번 올려도 두 배가 되지 않습니다.
       </div>
