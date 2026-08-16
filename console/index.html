@@ -37,7 +37,8 @@
   /* 통계 카드 */
   .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:10px; }
   .stat { background:#fff; border:1px solid #E5E9F2; border-radius:12px; padding:11px 16px; display:flex; align-items:center; gap:12px; }
-  .stat .ic { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:19px; }
+  .stat .ic { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:19px; flex:none; }
+  .stat .ic svg { width:19px; height:19px; }
   .stat .v { font-size:23px; font-weight:800; line-height:1; }
   .stat .l { font-size:12px; color:#7A869C; margin-top:3px; }
 
@@ -64,8 +65,14 @@
   /* 모달 */
   .backdrop { position:fixed; inset:0; background:rgba(20,30,55,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
   .modal { background:#fff; border-radius:16px; width:520px; max-width:92%; max-height:88vh; overflow:auto; padding:24px; }
-  .kv { display:grid; grid-template-columns:120px 1fr; gap:8px 12px; font-size:14px; margin-top:12px; }
+  .kv { display:grid; grid-template-columns:132px 1fr; gap:0 14px; font-size:14px; margin-top:12px; }
+  /* 줄이 많아지면 눈이 짝을 잃는다. 옅은 구분선으로 행을 붙들어 준다. */
+  .kv > div { padding:8px 0; border-bottom:1px solid #F1F4FA; }
+  .kv > div:nth-last-child(-n+2) { border-bottom:0; }
   .kv .k { color:#7A869C; }
+  .cardhead { display:flex; align-items:center; gap:10px; margin-bottom:2px; }
+  .cardhead b { font-size:15px; color:#22314F; }
+  .cardhead .hint { margin-left:auto; font-size:12px; color:#96A1B5; }
   .tabs { display:flex; gap:8px; margin-bottom:16px; }
   .tab { padding:8px 16px; border-radius:9px; background:#fff; border:1px solid #DCE2EE; cursor:pointer; font-weight:600; font-size:14px; }
   .tab.active { background:#4353E0; color:#fff; border-color:#4353E0; }
@@ -75,13 +82,23 @@
   .card.pad input, .card.pad select, .login input { width:100%; margin-bottom:2px; }
   .dbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
   .dbar h2 { margin:0; font-size:19px; }
-  .tabs2 { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; background:#fff; padding:6px; border:1px solid #E7EBF3; border-radius:14px; box-shadow:0 1px 3px rgba(20,40,80,.04); }
-  .tab2 { padding:9px 18px; font-size:14px; font-weight:600; color:#5C6B86; cursor:pointer; border-radius:10px; transition:all .12s; }
-  .tab2:hover { background:#F3F6FC; }
+  .tabs2 { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px; background:#fff; padding:6px; border:1px solid #E7EBF3; border-radius:14px; box-shadow:0 1px 3px rgba(20,40,80,.04); }
+  .tab2 { display:flex; align-items:center; gap:7px; padding:9px 15px; font-size:14px; font-weight:600; color:#5C6B86; cursor:pointer; border-radius:10px; transition:background .13s, color .13s, box-shadow .13s; user-select:none; }
+  .tab2 svg { width:16px; height:16px; opacity:.75; flex:none; }
+  .tab2:hover { background:#F3F6FC; color:#33415C; }
+  .tab2:hover svg { opacity:1; }
+  .tab2.on { background:linear-gradient(135deg,#4353E0,#5A6BF0); color:#fff; box-shadow:0 3px 10px rgba(67,83,224,.32); }
+  .tab2.on svg { opacity:1; }
+  /* 탭 안 건수 — 0 이면 아예 달지 않는다. 0을 붙이면 눈이 매번 확인한다. */
+  .tab2 .n { min-width:19px; height:19px; padding:0 5px; border-radius:9px; background:#EEF1F8; color:#5C6B86;
+             font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .tab2 .n.hot { background:#FBE3E3; color:#C0392B; }
+  .tab2.on .n { background:rgba(255,255,255,.24); color:#fff; }
   .tab2.on { color:#fff; background:linear-gradient(90deg,#2C6CD0,#4353E0); box-shadow:0 3px 8px rgba(44,108,208,.28); }
   .rbar { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
   .chip.sm { padding:5px 12px; font-size:13px; }
   .ov { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+  @media (max-width:900px){ .ov { grid-template-columns:repeat(2,1fr); } }
   .frow input[type=date] { width:150px; }
   .frow #region, .frow #sigungu { width:170px; }
   .fsec{ font-size:14px; font-weight:700; color:#2B3A57; margin:18px 0 8px; padding-bottom:6px; border-bottom:1px solid #E5E9F2; }
@@ -269,6 +286,21 @@ function modalEl(html){ const bd=document.createElement('div'); bd.className='ba
   bd.onclick=e=>{ if(e.target===bd) bd.remove(); }; document.body.appendChild(bd); return bd; }
 
 // ── 화장실 상세 (전체화면 · 개요 + 로그 탭 + CSV) ──
+// 탭 아이콘. 외부 아이콘 폰트를 쓰면 폐쇄망에서 네모가 뜬다 — 경로만 담아
+// 인라인 SVG 로 그린다.
+const ICON_PATH={
+  overview:'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  cleaning:'M9.6 4.6A2 2 0 1 1 11 8H2M12.6 19.4A2 2 0 1 0 14 16H2M17.7 7.7A2.5 2.5 0 1 1 19.5 12H2',
+  dispense:'M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM3.3 7L12 12l8.7-5M12 22V12',
+  complaints:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  inspections:'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9zM9 14l2 2 4-4',
+  safety:'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  satisfaction:'M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.8l-6.2 3.3L7 14.1 2 9.3l6.9-1z',
+  env:'M14 14.8V3.5a2.5 2.5 0 0 0-5 0v11.3a4 4 0 1 0 5 0z',
+};
+const svgIcon=(k)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round"><path d="${ICON_PATH[k]||''}"/></svg>`;
+
 const LOG_TABS = [
   { key:'cleaning', label:'청소', table:'cleaning_logs', ts:'cleaned_at',
     cols:[['cleaned_at','시각','dt'],['cleaner','담당자'],['note','비고']] },
@@ -294,7 +326,14 @@ function renderDetail(){
   mountShell();
   const admin=canAdd();
   const body=document.getElementById('body');
-  const tabs=[{key:'overview',label:'개요'},...LOG_TABS].map(t=>`<div class="tab2 ${state.tab===t.key?'on':''}" data-t="${t.key}">${esc(t.label)}</div>`).join('');
+  // 건수는 눈이 먼저 가야 할 곳에만 붙인다 — 미처리 민원과 오늘 청소.
+  const badge=(k)=>{
+    if(k==='complaints' && l.open_complaints>0) return `<span class="n hot">${l.open_complaints}</span>`;
+    if(k==='cleaning' && l.today_cleanings>0) return `<span class="n">${l.today_cleanings}</span>`;
+    return '';
+  };
+  const tabs=[{key:'overview',label:'개요'},...LOG_TABS].map(t=>
+    `<div class="tab2 ${state.tab===t.key?'on':''}" data-t="${t.key}">${svgIcon(t.key)}<span>${esc(t.label)}</span>${badge(t.key)}</div>`).join('');
   body.innerHTML=`<div class="dbar"><button class="btn line sm" id="back">← 목록</button>
       <h2>${esc(l.name)} <span class="muted" style="font-weight:400"><code>${esc(l.code)}</code> · ${esc(l.org_name||'')}</span></h2></div>
     <div class="tabs2">${tabs}</div><div id="tab"></div>`;
@@ -358,13 +397,23 @@ function exportCsv(tab,rows,l){
 function overviewHtml(l,admin){
   const st=STATUS[l.status]||{l:l.status};
   const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
-  const card=(v,lab)=>`<div class="stat"><div><div class="v" style="font-size:22px">${v}</div><div class="l">${lab}</div></div></div>`;
+  // 숫자만 넉 장 있으면 어느 것이 나쁜 상태인지 읽어야 안다. 아이콘 색으로
+  // 먼저 보이게 한다 — 재고 부족과 미처리 민원은 붉게.
+  const card=(icon,tone,v,lab)=>`<div class="stat">
+    <div class="ic" style="background:${tone[0]};color:${tone[1]}">${svgIcon(icon)}</div>
+    <div><div class="v" style="font-size:22px">${v}</div><div class="l">${lab}</div></div></div>`;
+  const GREY=['#EEF1F8','#5C6B86'], BLUE=['#E8EDFD','#4353E0'],
+        GREEN=['#E4F6EC','#138A55'], AMBER=['#FCEFD6','#B5730A'], RED=['#FBE3E3','#C0392B'];
+  const lowStock=l.pad_qty!=null && l.pad_cap && l.pad_qty <= l.pad_cap*0.2;
   return `<div class="ov">
-    ${card((l.today_cleanings||0)+'회','오늘 청소')}
-    ${card(l.pad_qty==null?'-':l.pad_qty+' / '+l.pad_cap,'생리용품 재고')}
-    ${card((l.open_complaints||0)+'건','미처리 민원')}
-    ${card(l.online?'온라인':'오프라인','접속')}</div>
-    <div class="card pad"><div class="kv">
+    ${card('cleaning', l.today_cleanings>0?GREEN:GREY, (l.today_cleanings||0)+'회','오늘 청소')}
+    ${card('dispense', l.pad_qty==null?GREY:(lowStock?RED:BLUE),
+           l.pad_qty==null?'-':l.pad_qty+' / '+l.pad_cap,'생리용품 재고')}
+    ${card('complaints', l.open_complaints>0?RED:GREY, (l.open_complaints||0)+'건','미처리 민원')}
+    ${card('safety', l.online?GREEN:AMBER, l.online?'온라인':'오프라인','접속')}</div>
+    <div class="card pad">
+    <div class="cardhead"><span style="color:#4353E0;display:flex">${svgIcon('overview')}</span><b>기본 정보</b></div>
+    <div class="kv">
       ${row('코드',`<code>${esc(l.code)}</code>`)}
       ${row('소속',esc(l.org_name||'-'))}
       ${row('지역',esc([l.sido,l.sigungu].filter(Boolean).join(' ')||'-'))}
@@ -401,11 +450,12 @@ function settingsHtml(l,d){
   const am=(i.amenities||[]).map(k=>(AMENITIES.find(a=>a[0]===k)||[,k])[1]).join(' · ')||'-';
   const ok=infoOk({agency:i.agency,phone:i.phone,hours:h},l.address);
   return `<div class="card pad" style="margin-top:16px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <b style="font-size:15px">이용 안내 · 설치 구성</b>
+    <div class="cardhead">
+      <span style="color:#4353E0;display:flex">${svgIcon('inspections')}</span>
+      <b>이용 안내 · 설치 구성</b>
       ${ok?'<span class="badge b-g">정보 완성</span>'
          :'<span class="badge b-a">정보 미완성 — 키오스크에 일부가 표시되지 않습니다</span>'}
-      <span class="muted" style="font-size:12px;margin-left:auto">키오스크 &lsquo;이용 안내&rsquo; 화면에 그대로 나갑니다</span>
+      <span class="hint">키오스크 &lsquo;이용 안내&rsquo; 화면에 그대로 나갑니다</span>
     </div>
     <div class="kv">
       ${row('관리기관',esc(i.agency||'-'))}
