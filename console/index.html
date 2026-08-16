@@ -644,21 +644,35 @@ function renderAdd(){
     pane.innerHTML=`<div class="card pad" style="max-width:640px">
       <div class="grid2">
         ${regionPicker('a')}
-        <div><label class="f">코드(고유)</label><input id="code" placeholder="GG-SUWON-003"/></div>
         <div><label class="f">이름</label><input id="name" placeholder="광교호수공원 공중화장실"/></div>
+        <div><label class="f">코드(고유)</label><input id="code" placeholder="자동 생성"/>
+          <div style="font-size:12px;color:#6B7A95;margin-top:4px" id="codehint">비우면 자동으로 매겨집니다</div></div>
         <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
         <div><label class="f">단말 라벨(선택)</label><input id="dlabel" placeholder="입구 키오스크"/></div>
       </div><div id="msg" style="margin:8px 0"></div>
       <button class="btn" id="save">등록하고 페어링 코드 받기</button></div>`;
     wireRegion(pane,'a');
+    // 지역을 고르면 그 지자체의 다음 코드를 미리 보여준다. 무엇이 발급될지
+    // 모른 채 저장하게 두면 결국 사람이 직접 적어 넣는다.
+    const showNext=async()=>{
+      const org=pickedOrg(pane,'a'); const hint=pane.querySelector('#codehint');
+      if(!org||!hint) return;
+      try{ const c=await rpc('next_location_code',{p_org_code:org});
+        hint.textContent=`비우면 ${c} 로 매겨집니다`; }
+      catch(e){ hint.textContent='비우면 자동으로 매겨집니다'; }
+    };
+    pane.querySelector('#a_sido').addEventListener('change',()=>setTimeout(showNext,0));
+    pane.querySelector('#a_sgg').addEventListener('change',showNext);
+    showNext();
     document.getElementById('save').onclick=async()=>{
       const q=id=>document.getElementById(id); const msg=q('msg');
-      const p_code=q('code').value.trim(), p_name=q('name').value.trim();
-      if(!p_code||!p_name){msg.innerHTML='<div class="err">코드와 이름은 필수입니다.</div>';return;}
+      const p_code=q('code').value.trim()||null, p_name=q('name').value.trim();
+      if(!p_name){msg.innerHTML='<div class="err">이름을 입력해 주세요.</div>';return;}
       const org=pickedOrg(pane,'a');
       if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
       try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,p_device_label:q('dlabel').value.trim()||null,p_stock:parseInt(q('stock').value||'0',10)});
-        msg.innerHTML=`<div class="ok">등록 완료! 페어링 코드: <code>${esc(res.pairing_code)}</code></div>`; q('code').value='';q('name').value='';
+        msg.innerHTML=`<div class="ok">등록 완료 — <code>${esc(res.code)}</code> · 페어링 코드 <code>${esc(res.pairing_code)}</code></div>`;
+        q('code').value='';q('name').value=''; showNext();
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
   }
@@ -667,18 +681,19 @@ function renderAdd(){
     pane.innerHTML=`<div class="card pad">
       <label class="f">지역(전체 적용)</label>
       <div class="grid2" style="max-width:520px">${regionPicker('b')}</div>
-      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>코드,이름,재고</code></label>
-      <textarea id="csv" placeholder="GG-SUWON-010,매산로 공중화장실,20
-GG-SUWON-011,행궁동 공중화장실,15"></textarea>
+      <label class="f" style="margin-top:10px">붙여넣기 — 한 줄에: <code>이름,재고</code></label>
+      <textarea id="csv" placeholder="매산로 공중화장실,20
+행궁동 공중화장실,15"></textarea>
       <div style="font-size:12px;color:#6B7A95;margin-top:4px">
-        지역은 위에서 고른 것이 모든 행에 적용됩니다. 시·군·구가 다르면 나눠서 등록하세요.
+        코드는 자동으로 매겨집니다. 지역은 위에서 고른 것이 모든 행에 적용되니, 시·군·구가 다르면 나눠서 등록하세요.<br>
+        같은 지자체에 <b>같은 이름</b>이 이미 있으면 중복으로 건너뜁니다 — 실수로 두 번 붙여넣어도 두 배로 등록되지 않습니다.
       </div>
       <div id="msg" style="margin:8px 0"></div><button class="btn" id="run">일괄 등록</button>
       <div id="result" style="margin-top:14px"></div></div>`;
     document.getElementById('run').onclick=async()=>{
       const msg=document.getElementById('msg'); const org=pickedOrg(pane,'b');
       if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
-      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,code:c[0],name:c[1]||c[0],stock:c[2]||'0'};}).filter(r=>r.code);
+      const rows=document.getElementById('csv').value.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{const c=line.split(',').map(x=>x.trim());return{org_code:org,name:c[0],stock:c[1]||'0'};}).filter(r=>r.name);
       if(!rows.length){msg.innerHTML='<div class="err">추가할 행이 없습니다.</div>';return;}
       if(rows.length>500){msg.innerHTML='<div class="err">한 번에 500개 이하로 나눠 주세요.</div>';return;}
       msg.innerHTML=`<div class="muted">${rows.length}개 처리 중…</div>`;
@@ -686,7 +701,7 @@ GG-SUWON-011,행궁동 공중화장실,15"></textarea>
         const ok=res.filter(r=>r.status==='ok').length,dup=res.filter(r=>r.status==='duplicate').length,er=res.filter(r=>r.status==='error').length;
         msg.innerHTML=`<div class="ok">완료: 성공 ${ok} · 중복 ${dup} · 오류 ${er}</div>`;
         const b=res.map(r=>`<tr><td>${esc(r.code)}</td><td>${r.pairing_code?`<code>${esc(r.pairing_code)}</code>`:'-'}</td><td>${r.status==='ok'?'<span class="badge b-g">성공</span>':r.status==='duplicate'?'<span class="badge b-a">중복</span>':`<span class="badge b-r">오류</span> <span class="muted">${esc(r.message||'')}</span>`}</td></tr>`).join('');
-        document.getElementById('result').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0"><b>결과</b><button class="btn sm line" id="dl">페어링 코드 CSV</button></div><div class="tcard tscroll"><table><thead><tr><th>코드</th><th>페어링코드</th><th>상태</th></tr></thead><tbody>${b}</tbody></table></div>`;
+        document.getElementById('result').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0"><b>결과</b><button class="btn sm line" id="dl">페어링 코드 CSV</button></div><div class="tcard tscroll"><table><thead><tr><th>발급된 코드</th><th>페어링코드</th><th>상태</th></tr></thead><tbody>${b}</tbody></table></div>`;
         document.getElementById('dl').onclick=()=>download('pairing-codes.csv','code,pairing_code,status\n'+res.map(r=>`${r.code},${r.pairing_code||''},${r.status}`).join('\n'));
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
