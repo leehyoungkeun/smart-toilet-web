@@ -46,7 +46,16 @@ const CFG = {
 };
 const root = document.getElementById('root');
 
-// 폰 브라우저별 영구 식별값 (1일 1회 제한 기준). 본인인증 대체 — 느슨함.
+// 제공 횟수는 화장실마다 다르다. 문구를 여기 박아 두면 설정을 바꿔도 화면이
+// 옛말을 하고, 시민은 그걸 믿고 왔다가 거부당한다. 설정 값에서 만든다.
+var LIMIT_PERIOD = { day:'1일', week:'1주', month:'1개월' };
+function limitText(q){
+  if(!q || q.limit_count === 0) return '제한 없이';
+  var n = (q.limit_count == null) ? 1 : q.limit_count;
+  return (LIMIT_PERIOD[q.limit_period||'day']) + ' ' + n + '회';
+}
+
+// 폰 브라우저별 영구 식별값 (제공 횟수 제한 기준). 본인인증 대체 — 느슨함.
 function claimantId(){
   let id = localStorage.getItem('claimant_id');
   if(!id){
@@ -75,13 +84,17 @@ function screenDone(){
     + '<p class="muted">키오스크 하단 지급구에서 생리용품을 수령해 주세요.<br/>건강하고 편안한 하루 되세요.</p></div>';
 }
 
-function screenConsent(info){
+function screenConsent(info, quota){
+  var lim = limitText(quota);
+  // 남은 횟수를 미리 보여준다. 눌러 보고 거부당하는 것보다 낫다.
+  var left = (quota && quota.remaining != null && quota.limit_count > 0)
+    ? ' · 남은 횟수 ' + quota.remaining + '회' : '';
   root.innerHTML =
     '<div class="card">'
     + '<div class="loc">'+ (info.location_name||'공중화장실') +'</div>'
-    + '<div class="sub">'+ (info.item_label||'생리용품') +' · 1일 1회 무료 제공</div>'
+    + '<div class="sub">'+ (info.item_label||'생리용품') +' · '+ lim +' 무료 제공'+ left +'</div>'
     + (info.available ? '<span class="pill">지급 가능</span>' : '<span class="pill warn">재고 소진</span>')
-    + '<div class="terms">· 무상 생리용품은 여성·청소년 누구나 1일 1회 받을 수 있습니다.<br/>'
+    + '<div class="terms">· 무상 생리용품은 여성·청소년 누구나 '+ lim +' 받을 수 있습니다.<br/>'
     + '· 수령을 위해 아래 안내에 동의해 주세요. 별도 본인인증은 받지 않습니다.</div>'
     + '<label class="consent"><input type="checkbox" id="agree"/> <span>안내 사항을 확인했으며 수령에 동의합니다.</span></label>'
     + '<button class="btn" id="go" disabled>생리용품 받기</button>'
@@ -101,7 +114,10 @@ async function authorize(){
     if(res && res.success){ screenDone(); return; }
     const reason = res && res.reason;
     if(reason === 'already_claimed_today'){
-      screenError('오늘은 이미 수령하셨습니다', '무상 생리용품은 1일 1회 제공됩니다.<br/>내일 다시 이용해 주세요.');
+      var per = LIMIT_PERIOD[(res && res.limit_period) || 'day'];
+      var again = { '1일':'내일', '1주':'다음 주', '1개월':'다음 달' }[per] || '다음에';
+      screenError('이미 수령하셨습니다',
+        '무상 생리용품은 ' + limitText(res) + ' 제공됩니다.<br/>' + again + ' 다시 이용해 주세요.');
       return;
     }
     const map = { out_of_stock:'재고가 소진되었습니다.', expired:'QR이 만료되었습니다. 키오스크에서 다시 시작해 주세요.',
@@ -118,7 +134,10 @@ async function authorize(){
     if(info.status === 'dispensed'){ screenDone(); return; }
     if(info.status === 'expired'){ screenError('QR이 만료되었습니다', '키오스크에서 다시 시작해 주세요.'); return; }
     if(info.status === 'cancelled'){ screenError('취소된 요청입니다', '키오스크에서 다시 시작해 주세요.'); return; }
-    screenConsent(info);
+    // 남은 횟수 조회는 실패해도 수령을 막지 않는다 — 안내가 조금 덜 나올 뿐이다.
+    var quota = null;
+    try { quota = await rpc('dispense_quota', { p_token: CFG.token, p_claimant_id: claimantId() }); } catch(e){}
+    screenConsent(info, quota);
   } catch(e){ screenError('오류가 발생했습니다', '잠시 후 다시 시도해 주세요.'); }
 })();
 </script>

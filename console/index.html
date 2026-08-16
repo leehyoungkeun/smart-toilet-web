@@ -436,7 +436,8 @@ function openEdit(l){
       bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; });
       const box=bd.querySelector('#e_info');
       if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{});
-        box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; }); } })
+        box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&el.id!=='m_lcount') el.style.width='100%'; });
+        wireLimitHint(box,'m'); } })
     .catch(()=>{});
   bd.querySelector('[data-save]').onclick=async()=>{
     const q=s=>bd.querySelector(s);
@@ -504,6 +505,15 @@ function pickedOrg(root,id){ return root.querySelector(`#${id}_sgg`).value||null
 const TOILET_TYPE={separate:'남녀 분리',unisex:'남녀 공용',female:'여성 전용',male:'남성 전용'};
 const AMENITIES=[['diaper','기저귀 교환대'],['powder','파우더룸'],['nursing','수유실'],
   ['hotwater','온수 세면대'],['child','유아용 변기']];
+// 제공 횟수는 화면 문구이자 실제 제한이다. 예전에는 안내 문구와
+// authorize_dispense 의 하드코딩이 따로 놀아서, 문구를 고쳐도 실제로는 1회만
+// 나갔다. 시민은 화면을 믿고 왔다가 거부당한다.
+const LIMIT_PERIOD={day:'1일',week:'1주',month:'1개월'};
+const LIMIT_SCOPE={all:'전체 화장실 통합',location:'이 화장실에서만'};
+function limitText(ds){
+  const c=ds&&ds.limit_count; if(c===0) return '제한 없음';
+  return `${LIMIT_PERIOD[(ds&&ds.limit_period)||'day']} ${c==null?1:c}회`;
+}
 
 function infoFields(p,i){
   i=i||{}; const h=i.hours||{}, st=i.stalls||{}, ds=i.dispense||{}, am=i.amenities||[];
@@ -537,10 +547,25 @@ function infoFields(p,i){
       ${AMENITIES.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
         <input type="checkbox" data-am="${k}" style="width:auto" ${am.includes(k)?'checked':''}/> ${lab}</label>`).join('')}
     </div>
-    <div class="fsec">무상 생리용품 안내</div>
+    <div class="fsec">무상 생리용품</div>
     <div class="grid2">
       <div><label class="f">지급 방식</label><input id="${p}_method" value="${esc(ds.method||'QR 인증 후 무료')}"/></div>
-      <div><label class="f">제공 횟수</label><input id="${p}_limit" value="${esc(ds.limit||'1일 1회')}"/></div>
+      <div><label class="f">제공 횟수</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <select id="${p}_lperiod" style="flex:1">
+            ${Object.entries(LIMIT_PERIOD).map(([k,v])=>`<option value="${k}" ${(ds.limit_period||'day')===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+          <input id="${p}_lcount" type="number" min="0" style="width:70px"
+                 value="${ds.limit_count==null?1:esc(String(ds.limit_count))}"/>
+          <span class="muted" style="font-size:13px">회</span>
+        </div></div>
+      <div><label class="f">횟수를 세는 범위</label><select id="${p}_lscope">
+        ${Object.entries(LIMIT_SCOPE).map(([k,v])=>`<option value="${k}" ${(ds.limit_scope||'all')===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div style="align-self:end">
+        <div style="font-size:12px;color:#6B7A95" id="${p}_lhint"></div></div>
+    </div>
+    <div style="font-size:12px;color:#6B7A95;margin-top:4px">
+      0 회로 두면 제한 없이 지급합니다. 이 값이 <b>키오스크 안내 문구이자 실제 제한</b>이라 둘이 어긋날 수 없습니다.
     </div>`;
 }
 
@@ -553,7 +578,20 @@ function readInfo(root,p){
     type:v('type')||null,
     stalls:{m_toilet:n('mt'),m_urinal:n('mu'),f_toilet:n('ft'),accessible:n('acc')},
     amenities:[...root.querySelectorAll('[data-am]')].filter(c=>c.checked).map(c=>c.dataset.am),
-    dispense:{method:v('method')||null,limit:v('limit')||null} };
+    dispense:{method:v('method')||null,
+      limit_count:n('lcount')==null?1:n('lcount'),
+      limit_period:v('lperiod')||'day',
+      limit_scope:v('lscope')||'all'} };
+}
+// 설정을 그대로 문장으로 되비춘다. 저장 전에 무엇이 적용될지 보여야
+// "1일 2회로 바꿨는데 왜 안 되지" 가 생기지 않는다.
+function wireLimitHint(root,p){
+  const hint=root.querySelector(`#${p}_lhint`); if(!hint) return;
+  const upd=()=>{ const i=readInfo(root,p);
+    hint.textContent=`키오스크 표시: ${limitText(i.dispense)} · ${LIMIT_SCOPE[i.dispense.limit_scope]}`; };
+  ['lcount','lperiod','lscope'].forEach(id=>{
+    const e=root.querySelector(`#${p}_${id}`); if(e) e.addEventListener('change',upd); });
+  upd();
 }
 // 필수(A그룹)가 채워졌나 — 서버 info_complete() 와 같은 기준
 function infoOk(i){ return !!(i.detail && i.agency && i.phone && (i.hours.allday || i.hours.open)); }
@@ -749,6 +787,7 @@ function renderAdd(){
       <div id="msg" style="margin:12px 0"></div>
       <button class="btn" id="save">등록하고 페어링 코드 받기</button></div>`;
     wireRegion(pane,'a');
+    wireLimitHint(pane,'n');
     // 지역을 고르면 그 지자체의 다음 코드를 미리 보여준다. 무엇이 발급될지
     // 모른 채 저장하게 두면 결국 사람이 직접 적어 넣는다.
     const showNext=async()=>{
