@@ -161,8 +161,22 @@ async function renderDashboard(){
   body.innerHTML=`<div id="filters"></div><div id="stats"></div><div id="table"></div>`;
   renderFilters(); renderAll();
 }
-function regions(){ return [...new Set(state.locs.filter(l=>!l.deleted).map(l=>l.sido).filter(Boolean))].sort(); }
-function sigungus(sido){ return [...new Set(state.locs.filter(l=>!l.deleted&&(!sido||l.sido===sido)).map(l=>l.sigungu).filter(Boolean))].sort(); }
+// 화장실이 있는 지역만 고르게 한다. 전국 228개를 다 늘어놓으면 대부분이
+// 결과 0건이라 고를수록 헛수고가 된다. 개수를 함께 보여 준다.
+function regions(){
+  const m=new Map();
+  state.locs.filter(l=>!l.deleted&&l.sido).forEach(l=>m.set(l.sido,(m.get(l.sido)||0)+1));
+  return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+}
+// 광역을 고르지 않았으면 기초는 뜻이 없다. 전 지역의 시·군·구를 한 줄에
+// 섞어 놓으면 '북구' 가 어느 광역인지 알 수 없다.
+function sigungus(sido){
+  if(!sido) return [];
+  const m=new Map();
+  state.locs.filter(l=>!l.deleted&&l.sido===sido&&l.sigungu)
+    .forEach(l=>m.set(l.sigungu,(m.get(l.sigungu)||0)+1));
+  return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+}
 function count(pred){ return state.locs.filter(pred).length; }
 
 function renderFilters(){
@@ -173,8 +187,10 @@ function renderFilters(){
     <div class="frow"><div class="flabel">검색어</div>
       <input id="q" placeholder="코드·이름·지역 검색" style="flex:1;min-width:220px" value="${esc(f.q)}"/></div>
     <div class="frow"><div class="flabel">지역</div>
-      <select id="region"><option value="">전체 광역</option>${regions().map(r=>`<option ${f.region===r?'selected':''}>${esc(r)}</option>`).join('')}</select>
-      <select id="sigungu"><option value="">전체 기초</option>${sigungus(f.region).map(r=>`<option ${f.sigungu===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
+      <select id="region"><option value="">시·도 전체</option>${regions().map(([r,n])=>`<option value="${esc(r)}" ${f.region===r?'selected':''}>${esc(r)} (${n})</option>`).join('')}</select>
+      <select id="sigungu" ${f.region?'':'disabled'}>
+        <option value="">${f.region?'시·군·구 전체':'시·도를 먼저 선택'}</option>
+        ${sigungus(f.region).map(([r,n])=>`<option value="${esc(r)}" ${f.sigungu===r?'selected':''}>${esc(r)} (${n})</option>`).join('')}</select></div>
     <div class="frow"><div class="flabel">화장실 상태</div>
       ${chip('status','','전체')}${chip('status','active','운영중',count(l=>!l.deleted&&l.status==='active'))}${chip('status','maintenance','점검중',count(l=>!l.deleted&&l.status==='maintenance'))}${chip('status','inactive','중지',count(l=>!l.deleted&&l.status==='inactive'))}${chip('status','deleted','삭제됨',count(l=>l.deleted))}</div>
     <div class="frow"><div class="flabel">접속 상태</div>
@@ -191,7 +207,10 @@ function renderFilters(){
   const fl=document.getElementById('filters');
   fl.querySelectorAll('.chip[data-f]').forEach(b=>b.onclick=()=>{ f[b.dataset.f]=b.dataset.v; state.page=1; renderFilters(); renderAll(); });
   fl.querySelectorAll('.chip[data-p]').forEach(b=>b.onclick=()=>{ const d=+b.dataset.p; f.to=new Date(); f.from=new Date(Date.now()-d*86400000); state.page=1; renderFilters(); renderAll(); });
-  document.getElementById('search').onclick=()=>{ f.q=document.getElementById('q').value.trim(); f.region=document.getElementById('region').value;
+  document.getElementById('search').onclick=()=>{ f.q=document.getElementById('q').value.trim();
+    f.region=document.getElementById('region').value;
+    // 기초도 함께 읽는다. 빠져 있어서 검색을 누르면 옛 값이 남아 있었다.
+    f.sigungu=document.getElementById('sigungu').value;
     const fr=document.getElementById('from').value, to=document.getElementById('to').value; f.from=fr?new Date(fr):null; f.to=to?new Date(to+'T23:59:59'):null; state.page=1; renderFilters(); renderAll(); };
   document.getElementById('reset').onclick=()=>{ state.filters=defFilters(); state.page=1; renderFilters(); renderAll(); };
   document.getElementById('region').onchange=e=>{ f.region=e.target.value; f.sigungu=''; state.page=1; renderFilters(); renderAll(); };
