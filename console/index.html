@@ -7,7 +7,10 @@
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:#EEF1F6; color:#1B2540; }
-  .header { background:linear-gradient(90deg,#15408F,#2C6CD0); color:#fff; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; }
+  /* 띠는 화면 끝까지 채우되, 그 안의 글자는 본문과 같은 폭에 맞춘다.
+     제목이 화면 맨 왼쪽에 붙고 본문은 안쪽에서 시작하면 두 층이 따로 논다. */
+  .header { background:linear-gradient(90deg,#15408F,#2C6CD0); color:#fff; padding:14px 0; }
+  .header .hin { max-width:1560px; margin:0 auto; padding:0 14px; display:flex; align-items:center; justify-content:space-between; }
   .header .t { font-size:19px; font-weight:700; cursor:pointer; }
   .header .r { display:flex; align-items:center; gap:12px; font-size:14px; }
   .btn { border:0; border-radius:9px; padding:9px 15px; font-weight:600; font-size:14px; cursor:pointer; background:#4353E0; color:#fff; }
@@ -156,9 +159,10 @@ function renderLogin(msg){
   };
 }
 function shell(){
-  return `<div class="header"><div class="t" id="home">🚻 스마트 화장실 운영 콘솔</div>
+  return `<div class="header"><div class="hin">
+    <div class="t" id="home">🚻 스마트 화장실 운영 콘솔</div>
     <div class="r"><span class="muted" style="color:#dfe6f5">${esc((state.profile.full_name?state.profile.full_name+' · ':'')+(ROLE_LABEL[state.role]||'권한 없음'))}</span>
-    <button class="btn ghost sm" id="logout">로그아웃</button></div></div><div class="wrap" id="body"></div>`;
+    <button class="btn ghost sm" id="logout">로그아웃</button></div></div></div><div class="wrap" id="body"></div>`;
 }
 function mountShell(){app.innerHTML=shell();document.getElementById('home').onclick=renderDashboard;
   document.getElementById('logout').onclick=async()=>{await supabase.auth.signOut();renderLogin();};}
