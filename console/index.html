@@ -365,6 +365,7 @@ function overviewHtml(l,admin){
       ${row('코드',`<code>${esc(l.code)}</code>`)}
       ${row('소속',esc(l.org_name||'-'))}
       ${row('지역',esc([l.sido,l.sigungu].filter(Boolean).join(' ')||'-'))}
+      ${row('주소',esc(l.address||'-'))}
       ${row('상태',esc(st.l))}
       ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
       ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
@@ -435,7 +436,7 @@ function openEdit(l){
       bd.querySelectorAll('[data-sensor]').forEach(cb=>{ cb.checked=!!cs[cb.dataset.sensor]; });
       bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; });
       const box=bd.querySelector('#e_info');
-      if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{});
+      if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{},l.address);
         box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&el.id!=='m_lcount') el.style.width='100%'; });
         wireLimitHint(box,'m'); } })
     .catch(()=>{});
@@ -445,6 +446,7 @@ function openEdit(l){
       // 지역은 기관 코드로만 보낸다. 시도·시군구는 서버가 계층에서 채운다.
       await rpc('admin_update_location',{ p_id:l.id,
         p_name:q('#e_name').value.trim()||null, p_org_code:pickedOrg(bd,'e'),
+        p_address:bd.querySelector('#m_addr')?readAddr(bd,'m'):null,
         p_status:q('#e_status').value,
         p_stock:parseInt(q('#e_stock').value||'0',10), p_maintenance_until:q('#e_maint').value||null });
       // 센서 구성은 별도 RPC. 켜진 것만 담는다 — 없는 키는 미설치로 읽힌다.
@@ -454,7 +456,7 @@ function openEdit(l){
       await rpc('admin_set_features',{p_location_id:l.id,p_features:features});
       // 이용 안내는 불러오기가 끝난 뒤에만 저장한다. 아직 그려지지 않았는데
       // 저장하면 빈 값으로 덮어써 버린다.
-      if(bd.querySelector('#m_detail')) await rpc('admin_set_info',{p_location_id:l.id,p_info:readInfo(bd,'m')});
+      if(bd.querySelector('#m_addr')) await rpc('admin_set_info',{p_location_id:l.id,p_info:readInfo(bd,'m')});
       bd.remove(); renderDashboard();
     }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
@@ -515,12 +517,14 @@ function limitText(ds){
   return `${LIMIT_PERIOD[(ds&&ds.limit_period)||'day']} ${c==null?1:c}회`;
 }
 
-function infoFields(p,i){
+// 주소는 info 가 아니라 locations.address 에 저장한다(원래 있던 컬럼). 그래서
+// addr 을 따로 받아 넣는다.
+function infoFields(p,i,addr){
   i=i||{}; const h=i.hours||{}, st=i.stalls||{}, ds=i.dispense||{}, am=i.amenities||[];
   const num=(id,lab,v)=>`<div><label class="f">${lab}</label><input id="${p}_${id}" type="number" min="0" value="${v==null?'':esc(String(v))}"/></div>`;
   return `<div class="fsec">기본 정보 <span class="req">필수</span></div>
     <div class="grid2">
-      <div><label class="f">상세 위치</label><input id="${p}_detail" value="${esc(i.detail||'')}" placeholder="중앙근린공원 동측 광장"/></div>
+      <div><label class="f">주소</label><input id="${p}_addr" value="${esc(addr||'')}" placeholder="경기도 수원시 영통구 광교호수공원로 300"/></div>
       <div><label class="f">관리기관</label><input id="${p}_agency" value="${esc(i.agency||'')}" placeholder="수원시 공원녹지과"/></div>
       <div><label class="f">연락처</label><input id="${p}_phone" value="${esc(i.phone||'')}" placeholder="031-000-0000"/></div>
       <div><label class="f">운영시간</label>
@@ -573,7 +577,7 @@ function readInfo(root,p){
   const q=id=>root.querySelector(`#${p}_${id}`);
   const v=id=>{const e=q(id);return e?e.value.trim():'';};
   const n=id=>{const e=q(id);return e&&e.value!==''?parseInt(e.value,10):null;};
-  return { detail:v('detail')||null, agency:v('agency')||null, phone:v('phone')||null,
+  return { agency:v('agency')||null, phone:v('phone')||null,
     hours:{open:v('open')||null,close:v('close')||null,allday:!!q('allday')?.checked},
     type:v('type')||null,
     stalls:{m_toilet:n('mt'),m_urinal:n('mu'),f_toilet:n('ft'),accessible:n('acc')},
@@ -593,8 +597,9 @@ function wireLimitHint(root,p){
     const e=root.querySelector(`#${p}_${id}`); if(e) e.addEventListener('change',upd); });
   upd();
 }
+function readAddr(root,p){ const e=root.querySelector(`#${p}_addr`); return e?e.value.trim():''; }
 // 필수(A그룹)가 채워졌나 — 서버 info_complete() 와 같은 기준
-function infoOk(i){ return !!(i.detail && i.agency && i.phone && (i.hours.allday || i.hours.open)); }
+function infoOk(i,addr){ return !!(addr && i.agency && i.phone && (i.hours.allday || i.hours.open)); }
 
 // ── 알림 수신자 ──
 // 담당자는 인사이동으로 바뀌고 위탁업체는 계약 단위로 갈린다. DB 를 직접
@@ -765,7 +770,7 @@ function renderAdd(){
           <div style="font-size:12px;color:#6B7A95;margin-top:4px" id="codehint">비우면 자동으로 매겨집니다</div></div>
         <div><label class="f">단말 라벨(선택)</label><input id="dlabel" placeholder="입구 키오스크"/></div>
       </div>
-      ${infoFields('n',null)}
+      ${infoFields('n',null,null)}
       <div class="fsec">설치된 센서</div>
       <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0">
         ${SENSOR_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
@@ -806,20 +811,20 @@ function renderAdd(){
       if(!p_name){msg.innerHTML='<div class="err">이름을 입력해 주세요.</div>';return;}
       const org=pickedOrg(pane,'a');
       if(!org){msg.innerHTML='<div class="err">지역을 선택해 주세요.</div>';return;}
-      const info=readInfo(pane,'n');
+      const info=readInfo(pane,'n'), addr=readAddr(pane,'n');
       // 시민에게 보이는 값이라 막는다. 여기서 통과시키면 키오스크에 빈 칸이
       // 나가고, 그것을 나중에 채우는 일은 대개 일어나지 않는다.
-      if(!infoOk(info)){ msg.innerHTML='<div class="err">상세 위치·관리기관·연락처·운영시간은 필수입니다. (24시간 운영이면 체크)</div>'; return; }
+      if(!infoOk(info,addr)){ msg.innerHTML='<div class="err">주소·관리기관·연락처·운영시간은 필수입니다. (24시간 운영이면 체크)</div>'; return; }
       const sensors={}; pane.querySelectorAll('[data-sensor]').forEach(c=>{ if(c.checked) sensors[c.dataset.sensor]=true; });
       const features={}; pane.querySelectorAll('[data-feature]').forEach(c=>{ if(c.checked) features[c.dataset.feature]=true; });
       try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,
           p_device_label:q('dlabel').value.trim()||null,
           p_stock:parseInt(q('stock').value||'0',10),
           p_capacity:parseInt(q('cap').value||'30',10),
-          p_sensors:sensors, p_features:features, p_info:info,
+          p_sensors:sensors, p_features:features, p_info:info, p_address:addr,
           p_alert_low_pct:parseInt(q('lowpct').value||'20',10)});
         msg.innerHTML=`<div class="ok">등록 완료 — <code>${esc(res.code)}</code> · 페어링 코드 <code>${esc(res.pairing_code)}</code></div>`;
-        q('code').value='';q('name').value=''; pane.querySelector('#n_detail').value=''; showNext();
+        q('code').value='';q('name').value=''; pane.querySelector('#n_addr').value=''; showNext();
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
   }
