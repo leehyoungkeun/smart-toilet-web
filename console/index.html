@@ -294,6 +294,7 @@ function renderTable(){
       <div class="tools">
         <select id="ps">${[10,20,50,100].map(n=>`<option ${n===ps?'selected':''} value="${n}">${n}개씩 보기</option>`).join('')}</select>
         <button class="btn sm line" id="refresh">새로고침</button>
+        ${state.role==='platform_admin'?'<button class="btn sm line" id="settings">⚙ 설정</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
@@ -310,6 +311,7 @@ function renderTable(){
   t.querySelector('#refresh').onclick=renderDashboard;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
+  const stg=t.querySelector('#settings'); if(stg) stg.onclick=renderSettings;
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
   t.querySelector('#next').onclick=()=>{ if(state.page<pages){state.page++;renderTable();} };
   t.querySelectorAll('.lnk').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
@@ -375,9 +377,12 @@ function renderDetail(){
   // 화면의 주인공처럼 보인다.
   body.innerHTML=`<div class="dbar">
       <h2>${esc(l.name)} <span class="muted" style="font-weight:400"><code>${esc(l.code)}</code> · ${esc(l.org_name||'')}</span></h2>
-      <button class="btn line sm" id="back" style="margin-left:auto">목록으로 →</button></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        ${admin?'<button class="btn line sm" id="locset">⚙ 이 화장실 설정</button>':''}
+        <button class="btn line sm" id="back">목록으로 →</button></div></div>
     <nav class="tabs2">${tabs}</nav><div id="tab"></div>`;
   document.getElementById('back').onclick=renderDashboard;
+  const ls=document.getElementById('locset'); if(ls) ls.onclick=()=>renderSettings('location', l.id, l.name);
   body.querySelectorAll('.tab2').forEach(t=>t.onclick=()=>{ state.tab=t.dataset.t; renderDetail(); });
   renderTab(l, admin);
 }
@@ -1059,6 +1064,132 @@ async function renderNotifyLog(){
 
 // ── 화장실 추가 ──
 function orgOptions(){return state.orgs.map(o=>`<option value="${esc(o.code)}">${esc(o.name)} (${esc(o.code)})</option>`).join('');}
+// ── 설정 (전역 / 지자체 / 화장실) ──
+// 같은 폼으로 세 스코프를 다룬다. 상속 계층: 화장실 > 지자체 > 전역 > 기본값.
+// 각 행은 {inherited, value, overridden} 로 정규화해 렌더링을 통일한다.
+//   scope='global'  전역   (platform_admin, 표 위 버튼으로 진입)
+//   scope='org'     지자체 (전역 페이지의 지자체 드롭다운)
+//   scope='location'화장실 (화장실 상세의 '이 화장실 설정')
+async function renderSettings(scope, scopeId, scopeLabel){
+  scope=scope||'global';
+  mountShell();
+  const body=document.getElementById('body');
+  body.innerHTML='<div class="muted">불러오는 중…</div>';
+
+  let rows, orgs=[];
+  try{
+    if(scope!=='location'){ try{ orgs=await rpc('admin_org_list'); }catch(e){} }
+    if(scope==='global'){
+      const d=await rpc('get_platform_settings_admin');
+      rows=d.map(r=>({...r, inherited:r.default}));            // 전역의 상속값 = 코드 기본값
+    }else{
+      const d=await rpc('get_scope_overrides',{p_scope:scope,p_scope_id:scopeId});
+      rows=d.map(r=>({...r, value:(r.override!=null?r.override:r.inherited)}));
+    }
+  }catch(e){ body.innerHTML=`<div class="err">설정을 불러오지 못했습니다: ${esc(e.message)}</div>`; return; }
+
+  const CONSUMER={app:['연결됨','#1a7f37'],server:['서버(대기)','#15408F'],launcher:['런처(대기)','#8a6d00'],planned:['준비','#777']};
+  const edited={};                                            // key -> 새 값
+  const cur=d=> (d.key in edited)? edited[d.key] : d.value;
+  const isBool=v=> v===true||v==='true';
+  const inheritLabel = scope==='global' ? '기본' : '상속';
+
+  const sections=[]; const byS={};
+  rows.forEach(d=>{ if(!byS[d.section]){ byS[d.section]=[]; sections.push(d.section);} byS[d.section].push(d); });
+
+  let scopeBar;
+  if(scope==='location'){
+    scopeBar=`<div class="fcard" style="margin-bottom:14px;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>적용 범위</b> <span style="background:#0b7285;color:#fff;padding:2px 10px;border-radius:12px">화장실: ${esc(scopeLabel||'')}</span>
+      <span class="muted" style="font-size:12px">비워두면 지자체·전역 설정을 따릅니다</span></div>`;
+  }else{
+    const opts=orgs.map(o=>`<option value="${esc(o.id)}" ${scope==='org'&&String(scopeId)===String(o.id)?'selected':''}>${esc(o.name)}</option>`).join('');
+    scopeBar=`<div class="fcard" style="margin-bottom:14px;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>적용 범위</b>
+      <button class="btn sm ${scope==='global'?'':'line'}" id="sc_global">전역(전 기기)</button>
+      <span class="muted">·</span> 지자체별:
+      <select id="sc_org" style="min-width:180px"><option value="">— 지자체 선택 —</option>${opts}</select>
+      ${scope==='org'?'<span class="muted" style="font-size:12px">비워두면 전역을 따릅니다</span>':''}</div>`;
+  }
+
+  const badge=d=>{ const [l,c]=CONSUMER[d.consumer]||CONSUMER.planned; return `<span style="background:${c};color:#fff;font-size:11px;padding:1px 7px;border-radius:10px;margin-left:6px">${l}</span>`; };
+  const rowHtml=d=>{
+    const v=cur(d); let input;
+    if(d.type==='bool'){
+      input=`<label style="cursor:pointer"><input type="checkbox" data-k="${d.key}" ${isBool(v)?'checked':''}/> <span class="swtxt">${isBool(v)?'켜짐':'꺼짐'}</span></label>`;
+    }else if(d.type==='enum'){
+      const opts=(d.enum||[]).map(o=>`<option value="${esc(o)}" ${String(v)===o?'selected':''}>${esc(o)}</option>`).join('');
+      input=`<select data-k="${d.key}">${opts}</select>`;
+    }else{
+      input=`<input type="number" data-k="${d.key}" value="${esc(String(v))}" step="${d.type==='num'?'any':'1'}" ${d.min!=null?`min="${d.min}"`:''} ${d.max!=null?`max="${d.max}"`:''} style="width:110px"/>`;
+    }
+    const range=(d.min!=null||d.max!=null)?` · 범위 ${d.min??''}~${d.max??''}`:'';
+    const inh=(typeof d.inherited==='boolean')?(d.inherited?'켜짐':'꺼짐'):String(d.inherited);
+    return `<div style="display:grid;grid-template-columns:1fr auto;gap:24px;padding:12px 2px;border-top:1px solid #eef;align-items:center">
+      <div style="min-width:0"><b>${esc(d.label)}</b>${badge(d)}${d.overridden?'<span style="color:#8a6d00;font-size:11px;margin-left:6px">● 오버라이드</span>':''}
+        <div class="muted" style="font-size:12px;margin-top:2px">${esc(d.effect||'')}</div></div>
+      <div style="text-align:right;white-space:nowrap">${input} <b style="font-size:13px">${esc(d.unit||'')}</b>
+        <div class="muted" style="font-size:12px;margin-top:2px">${inheritLabel} ${esc(inh)}${range}</div></div>
+    </div>`;
+  };
+
+  const secHtml=sections.length? sections.map(s=>`<div class="fcard" style="margin-bottom:14px;padding:16px 20px"><h3 style="margin:0 0 2px">${esc(s)}</h3>${byS[s].map(rowHtml).join('')}</div>`).join('')
+    : '<div class="fcard muted" style="padding:20px">이 범위에서 덮어쓸 수 있는 설정이 없습니다.</div>';
+  const title= scope==='global'?'플랫폼 전역 설정' : scope==='org'?'지자체 설정' : '화장실 설정';
+  const sub  = scope==='global'?'전 기기 공통 정책' : scope==='org'?'이 지자체 화장실에만 적용(전역 위에 덮어씀)' : '이 화장실에만 적용(지자체·전역 위에 덮어씀)';
+
+  body.innerHTML=`<div style="max-width:880px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px">
+      <div><h2 style="margin:0">${title}</h2><div class="muted" style="font-size:13px">${sub} · 저장하면 재배포 없이 반영</div></div>
+      <div style="display:flex;gap:8px;flex:none"><button class="btn" id="save" disabled>저장</button><button class="btn line" id="back">← ${scope==='location'?'화장실 상세':'목록'}</button></div>
+    </div>${scopeBar}${secHtml}
+    <div class="muted" style="font-size:12px;margin-top:6px;line-height:1.7">${scope==='global'?'값을 기본값과 같게 두면 오버라이드가 지워집니다. ':'값을 상속값과 같게 두면 오버라이드가 지워져 상위 설정을 따릅니다. '}배지 — <b style="color:#1a7f37">연결됨</b>: 앱 즉시 소비 · <b style="color:#15408F">서버(대기)</b> · <b style="color:#8a6d00">런처(대기)</b> · <b>준비</b></div>
+  </div>`;
+
+  const saveBtn=body.querySelector('#save');
+  const mark=()=>{ saveBtn.disabled=Object.keys(edited).length===0; };
+  body.querySelector('#back').onclick=()=> scope==='location'? openDetail(scopeId) : renderDashboard();
+  const scg=body.querySelector('#sc_global'); if(scg) scg.onclick=()=>renderSettings('global');
+  const sco=body.querySelector('#sc_org'); if(sco) sco.onchange=e=>{ if(e.target.value) renderSettings('org', e.target.value, e.target.selectedOptions[0].text); };
+
+  body.querySelectorAll('[data-k]').forEach(el=>{
+    const k=el.dataset.k, d=rows.find(x=>x.key===k);
+    const onEdit=()=>{
+      let v;
+      if(d.type==='bool'){ v=el.checked; const s=el.parentNode.querySelector('.swtxt'); if(s) s.textContent=v?'켜짐':'꺼짐'; }
+      else if(d.type==='enum'){ v=el.value; }
+      else { v=(el.value===''?null:Number(el.value)); }
+      const orig=d.value;
+      if(v===orig || (typeof orig==='number' && Number(v)===orig)) delete edited[k]; else edited[k]=v;
+      mark();
+    };
+    el.addEventListener('change',onEdit);
+    if(d.type!=='bool'&&d.type!=='enum') el.addEventListener('input',onEdit);
+  });
+
+  saveBtn.onclick=async()=>{
+    const keys=Object.keys(edited); if(!keys.length) return;
+    const f=x=> (typeof x==='boolean')?(x?'켜짐':'꺼짐'):x;
+    const lines=keys.map(k=>{ const d=rows.find(x=>x.key===k); return `· ${d.label}: ${f(d.value)} → ${f(edited[k])}`; }).join('\n');
+    const where= scope==='global'?'전 기기' : scope==='org'?'이 지자체' : '이 화장실';
+    if(!confirm(`다음 설정을 ${where}에 적용합니다:\n\n${lines}\n\n계속할까요?`)) return;
+    saveBtn.disabled=true; saveBtn.textContent='저장 중…';
+    try{
+      if(scope==='global'){
+        const patch={}; keys.forEach(k=>patch[k]=edited[k]);
+        await rpc('update_platform_settings',{p_patch:patch});
+      }else{
+        for(const k of keys){
+          const d=rows.find(x=>x.key===k), v=edited[k], inh=d.inherited;
+          if(v===inh || (typeof inh==='number' && Number(v)===inh)) await rpc('clear_scope_override',{p_scope:scope,p_scope_id:scopeId,p_key:k});
+          else await rpc('set_scope_override',{p_scope:scope,p_scope_id:scopeId,p_key:k,p_value:v});
+        }
+      }
+      alert('저장되었습니다. 기기에 곧 반영됩니다.'); renderSettings(scope, scopeId, scopeLabel);
+    }catch(e){ alert('저장 실패: '+e.message); saveBtn.disabled=false; saveBtn.textContent='저장'; }
+  };
+}
+
 function renderAdd(){
   mountShell();
   const body=document.getElementById('body');
