@@ -311,7 +311,7 @@ function renderTable(){
   t.querySelector('#refresh').onclick=renderDashboard;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
-  const stg=t.querySelector('#settings'); if(stg) stg.onclick=renderSettings;
+  const stg=t.querySelector('#settings'); if(stg) stg.onclick=()=>renderSettings('global');
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
   t.querySelector('#next').onclick=()=>{ if(state.page<pages){state.page++;renderTable();} };
   t.querySelectorAll('.lnk').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
