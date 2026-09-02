@@ -1066,7 +1066,7 @@ async function renderOperators(){
     <td>${esc(o.email)}</td>
     <td>${esc(o.full_name||'-')}</td>
     <td>${esc(ROLE_LABEL[o.role]||o.role)}</td>
-    <td>${esc(o.org_name ? (o.org_name + (o.scope_sigungu ? ' · '+o.scope_sigungu : ' (전체)')) : (o.role==='platform_admin'?'전체':'-'))}</td>
+    <td>${esc(o.org_name||(o.role==='platform_admin'?'전체':'-'))}</td>
     <td><button class="btn sm line" data-edit="${esc(o.id)}">수정</button></td></tr>`).join('');
   body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <h2 style="margin:0">운영자 관리</h2>
@@ -1089,7 +1089,8 @@ async function renderOperators(){
 function editOperator(o){
   const isNew=!o; o=o||{role:'operator'};
   const sel=(v,cur)=>v===cur?'selected':'';
-  const curSido = o.org_code ? (((state.regions||[]).find(r=>r.code===o.org_code)||{}).sido||'') : '';
+  const curReg=(state.regions||[]).find(r=>r.code===o.org_code);
+  const curSido = o.org_code ? (curReg?curReg.sido:(((state.orgs||[]).find(g=>g.code===o.org_code)||{}).name||'')) : '';
   const sidoOpts=`<option value="">— (미지정 / 전체)</option>`+
     sidoList().map(s=>`<option value="${esc(s)}" ${curSido===s?'selected':''}>${esc(s)}</option>`).join('');
   const bd=modalEl(`<h2 style="margin:0 0 14px">${isNew?'운영자 추가':'운영자 수정'}</h2>
@@ -1116,24 +1117,24 @@ function editOperator(o){
   const fillSgg=()=>{ const sido=q('#o_sido').value, sgg=q('#o_sgg');
     if(!sido){ sgg.innerHTML='<option value="">—</option>'; sgg.disabled=true; return; }
     sgg.disabled=false;
-    const list=[...new Set((state.regions||[]).filter(r=>r.sido===sido).map(r=>r.sigungu).filter(Boolean))];
+    const rows=(state.regions||[]).filter(r=>r.sido===sido && r.sigungu);   // 기초(자식 org)만
     sgg.innerHTML='<option value="">(광역 전체)</option>'+
-      list.map(sg=>`<option value="${esc(sg)}" ${o.scope_sigungu===sg?'selected':''}>${esc(sg)}</option>`).join(''); };
+      rows.map(r=>`<option value="${esc(r.code)}" ${o.org_code===r.code?'selected':''}>${esc(r.sigungu)}</option>`).join(''); };
   q('#o_sido').onchange=fillSgg; fillSgg();
   q('[data-x]').onclick=()=>bd.remove();
   q('[data-save]').onclick=async()=>{
     const role=q('#o_role').value, full_name=q('#o_name').value.trim();
-    const sido=q('#o_sido').value;
-    const org_code = sido ? (((state.regions||[]).find(r=>r.sido===sido)||{}).code||null) : null;
-    const sigungu = q('#o_sgg').value||null;
+    const sido=q('#o_sido').value, sggCode=q('#o_sgg').value;
+    // 기초 고르면 그 기초 org, "(광역 전체)"면 시·도 이름의 광역 org
+    const org_code = sido ? (sggCode || (((state.orgs||[]).find(g=>g.name===sido)||{}).code||null)) : null;
     try{
       if(isNew){
         const email=q('#o_email').value.trim(), password=q('#o_pw').value;
         if(!email||!password) return msg('이메일과 초기 비밀번호를 입력하세요.');
         if(password.length<8) return msg('비밀번호는 8자 이상이어야 합니다.');
-        await callFn('create',{email,password,full_name,role,org_code,sigungu});
+        await callFn('create',{email,password,full_name,role,org_code});
       }else{
-        await rpc('admin_update_operator',{p_user:o.id,p_role:role,p_org_code:org_code,p_full_name:full_name,p_sigungu:sigungu});
+        await rpc('admin_update_operator',{p_user:o.id,p_role:role,p_org_code:org_code,p_full_name:full_name});
       }
       bd.remove(); renderOperators();
     }catch(e){ msg((isNew?'추가':'저장')+' 실패: '+e.message); }
