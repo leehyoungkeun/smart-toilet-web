@@ -295,6 +295,7 @@ function renderTable(){
         <select id="ps">${[10,20,50,100].map(n=>`<option ${n===ps?'selected':''} value="${n}">${n}개씩 보기</option>`).join('')}</select>
         <button class="btn sm line" id="refresh">새로고침</button>
         ${state.role==='platform_admin'?'<button class="btn sm line" id="settings">⚙ 설정</button>':''}
+        ${state.role==='platform_admin'?'<button class="btn sm line" id="operators">👤 운영자</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
@@ -311,6 +312,7 @@ function renderTable(){
   t.querySelector('#refresh').onclick=renderDashboard;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
+  const op=t.querySelector('#operators'); if(op) op.onclick=renderOperators;
   const stg=t.querySelector('#settings'); if(stg) stg.onclick=()=>renderSettings('global');
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
   t.querySelector('#next').onclick=()=>{ if(state.page<pages){state.page++;renderTable();} };
@@ -576,7 +578,7 @@ const SENSOR_KEYS=[['temperature','온도'],['humidity','습도'],['ammonia','�
 // 안전 시설·기능. 없는 것을 켜 두면 시민이 위급 상황에서 그걸 믿고 행동한다.
 const FEATURE_KEYS=[['emergency_bell','안심 비상벨'],['cctv_link','외부 CCTV 연계'],
   ['sound_detection','디지털 이상음 감지'],['camera_detection','불법촬영 탐지'],
-  ['dispenser','생리용품 배출기'],
+  ['dispenser','생리용품 배출기'],['qr_reader','QR 리더'],
   // 켜면 민원 화면에 연락처 칸이 생긴다. 보낼 채널(알림톡·SMS)이 준비된
   // 뒤에 켤 것 — 번호를 받아 놓고 회신이 안 가면 지금보다 나쁘다.
   ['complaint_feedback','민원 처리결과 회신']];
@@ -1034,6 +1036,107 @@ function editTarget(t){
         p_location_id: s==='loc'?q('#t_loc').value:null });
       bd.remove(); renderTargets();
     }catch(e){ q('#t_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
+  };
+}
+
+// ── 운영자 관리 (platform_admin 전용) ──
+// 로그인 계정 = Supabase Auth 사용자 + profiles(role·org). 생성/삭제/비번은 Edge Function(service_role),
+// 목록·역할수정은 RPC. anon 키로 auth 사용자를 못 만들기 때문에 이렇게 나눈다.
+async function callFn(action, payload){
+  const { data:{ session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-operators`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_KEY,
+              'Authorization':`Bearer ${session?.access_token||''}` },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const out = await res.json().catch(()=>({}));
+  if(!res.ok || out.error) throw new Error(out.error || `HTTP ${res.status}`);
+  return out;
+}
+
+async function renderOperators(){
+  mountShell();
+  const body=document.getElementById('body');
+  body.innerHTML='<div class="muted">불러오는 중…</div>';
+  let rows=[];
+  try{ rows=await rpc('admin_list_operators'); }
+  catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  const tr=rows.map(o=>`<tr>
+    <td>${esc(o.email)}</td>
+    <td>${esc(o.full_name||'-')}</td>
+    <td>${esc(ROLE_LABEL[o.role]||o.role)}</td>
+    <td>${esc(o.org_name||(o.role==='platform_admin'?'전체':'-'))}</td>
+    <td><button class="btn sm line" data-edit="${esc(o.id)}">수정</button></td></tr>`).join('');
+  body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0">운영자 관리</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn sm" id="new">＋ 운영자 추가</button>
+        <button class="btn line sm" id="back">← 목록</button></div></div>
+    <div class="tcard"><div class="tscroll"><table>
+      <thead><tr><th>이메일</th><th>이름·부서</th><th>역할</th><th>소속 지자체</th><th></th></tr></thead>
+      <tbody>${tr||'<tr><td colspan="5" class="muted" style="text-align:center;padding:30px">등록된 운영자가 없습니다.</td></tr>'}</tbody>
+    </table></div></div>
+    <div style="font-size:12px;color:#414C63;margin-top:10px">
+      새 운영자는 이메일·비밀번호로 <b>바로 로그인</b>됩니다(이메일 인증 불필요).<br>
+      역할 — <b>플랫폼 관리자</b>: 전체 · <b>지자체 관리자</b>: 소속 지자체 전체 · <b>운영자</b>: 배정 화장실만.
+    </div>`;
+  document.getElementById('back').onclick=renderDashboard;
+  document.getElementById('new').onclick=()=>editOperator(null);
+  body.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editOperator(rows.find(x=>x.id===b.dataset.edit)));
+}
+
+function editOperator(o){
+  const isNew=!o; o=o||{role:'operator'};
+  const sel=(v,cur)=>v===cur?'selected':'';
+  const orgOpts=`<option value="">— (없음 / 전체)</option>`+
+    (state.orgs||[]).map(g=>`<option value="${esc(g.code)}" ${o.org_code===g.code?'selected':''}>${esc(g.name)}</option>`).join('');
+  const bd=modalEl(`<h2 style="margin:0 0 14px">${isNew?'운영자 추가':'운영자 수정'}</h2>
+    <div class="grid2">
+      <div><label class="f">이메일</label><input id="o_email" value="${esc(o.email||'')}" ${isNew?'':'disabled'} placeholder="hong@suwon.go.kr"/></div>
+      <div><label class="f">이름·부서</label><input id="o_name" value="${esc(o.full_name||'')}" placeholder="수원시 여성정책과 김OO"/></div>
+      <div><label class="f">역할</label><select id="o_role">
+        ${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${sel(k,o.role)}>${v}</option>`).join('')}</select></div>
+      <div><label class="f">소속 지자체</label><select id="o_org">${orgOpts}</select></div>
+      ${isNew?`<div><label class="f">초기 비밀번호</label><input id="o_pw" type="text" placeholder="8자 이상"/></div>`:''}
+    </div>
+    <div style="font-size:12px;color:#414C63;margin-top:8px">플랫폼 관리자는 소속을 비워도 됩니다(전체 접근). 운영자에게 특정 화장실만 배정하는 것은 화장실 상세에서 지정합니다.</div>
+    <div id="o_msg" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" data-save>${isNew?'추가':'저장'}</button>
+      ${isNew?'':'<button class="btn line" data-pw>비밀번호 재설정</button>'}
+      ${isNew?'':'<button class="btn line" data-del>삭제</button>'}
+      <button class="btn line" data-x>취소</button></div>`);
+  bd.querySelectorAll('input,select').forEach(el=>{ el.style.width='100%'; });
+  const q=s=>bd.querySelector(s);
+  const msg=m=>q('#o_msg').innerHTML=m?`<div class="err">${esc(m)}</div>`:'';
+  q('[data-x]').onclick=()=>bd.remove();
+  q('[data-save]').onclick=async()=>{
+    const role=q('#o_role').value, org_code=q('#o_org').value||null, full_name=q('#o_name').value.trim();
+    try{
+      if(isNew){
+        const email=q('#o_email').value.trim(), password=q('#o_pw').value;
+        if(!email||!password) return msg('이메일과 초기 비밀번호를 입력하세요.');
+        if(password.length<8) return msg('비밀번호는 8자 이상이어야 합니다.');
+        await callFn('create',{email,password,full_name,role,org_code});
+      }else{
+        await rpc('admin_update_operator',{p_user:o.id,p_role:role,p_org_code:org_code,p_full_name:full_name});
+      }
+      bd.remove(); renderOperators();
+    }catch(e){ msg((isNew?'추가':'저장')+' 실패: '+e.message); }
+  };
+  const del=bd.querySelector('[data-del]');
+  if(del) del.onclick=async()=>{
+    if(!confirm(`'${o.email}' 계정을 완전히 삭제할까요?\n로그인 자체가 사라집니다(되돌릴 수 없음).`)) return;
+    try{ await callFn('delete',{id:o.id}); bd.remove(); renderOperators(); }
+    catch(e){ msg('삭제 실패: '+e.message); }
+  };
+  const pw=bd.querySelector('[data-pw]');
+  if(pw) pw.onclick=async()=>{
+    const np=prompt(`'${o.email}' 새 비밀번호 (8자 이상):`); if(np==null) return;
+    if(np.length<8) return msg('비밀번호는 8자 이상이어야 합니다.');
+    try{ await callFn('reset_password',{id:o.id,password:np}); msg(''); alert('비밀번호가 변경되었습니다.'); }
+    catch(e){ msg('재설정 실패: '+e.message); }
   };
 }
 
