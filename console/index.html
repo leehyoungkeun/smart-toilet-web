@@ -287,6 +287,8 @@ function renderTable(){
       <td>${mi.state==='none'?'<span class="muted">-</span>':`<span class="badge ${mi.cls}">${mi.txt}</span>`}</td>
       <td class="muted">${fmtDate(l.created_at)}</td>
       <td>${l.device_code?`<code>${esc(l.device_code)}</code>`:'<span class="muted">미연결</span>'}</td>
+      <td>${l.app_version?`<code>${esc(l.app_version)}</code>`:'<span class="muted">-</span>'}</td>
+      <td>${l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">-</span>'}</td>
     </tr>`;
   }).join('');
   document.getElementById('table').innerHTML=`<div class="tcard">
@@ -300,8 +302,8 @@ function renderTable(){
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
     <div class="tscroll"><table>
-      <thead><tr><th>No</th><th>코드</th><th>이름</th><th>소속</th><th>지역</th><th>상태</th><th>접속</th><th>재고</th><th>민원</th><th>유지보수</th><th>등록일</th><th>장비코드</th></tr></thead>
-      <tbody>${body||'<tr><td colspan="12" class="muted" style="text-align:center;padding:30px">조건에 맞는 화장실이 없습니다.</td></tr>'}</tbody>
+      <thead><tr><th>No</th><th>코드</th><th>이름</th><th>소속</th><th>지역</th><th>상태</th><th>접속</th><th>재고</th><th>민원</th><th>유지보수</th><th>등록일</th><th>장비코드</th><th>앱 버전</th><th>MDM번호</th></tr></thead>
+      <tbody>${body||'<tr><td colspan="14" class="muted" style="text-align:center;padding:30px">조건에 맞는 화장실이 없습니다.</td></tr>'}</tbody>
     </table></div>
     <div class="pager"><span class="muted">${total===0?0:(state.page-1)*ps+1}–${Math.min(state.page*ps,total)} / ${total}</span>
       <div class="pg"><button class="btn sm line" id="prev" ${state.page<=1?'disabled':''}>이전</button>
@@ -502,6 +504,7 @@ function overviewHtml(l,admin){
       ${row('주소',esc(l.address||'-'))}
       ${row('상태',esc(st.l))}
       ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
+      ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
       ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
       ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
       ${row('등록일',fmtDate(l.created_at))}
@@ -591,6 +594,7 @@ function openEdit(l){
       ${regionPicker('e',l.sido,l.sigungu)}
       <div><label class="f">재고 (최대 ${l.pad_cap??30})</label><input id="e_stock" type="number" value="${l.pad_qty??0}"/></div>
       <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
+      <div><label class="f">MDM 기기번호 <span class="muted" style="font-weight:400">· 물리 태블릿 매칭</span></label><input id="e_mdm" value="${esc(l.mdm_number||'')}" placeholder="예: TEST0006"/></div>
     </div>
     <div id="e_info"><div class="muted" style="margin-top:14px">이용 안내 정보 불러오는 중…</div></div>
     <label class="f" style="margin-top:14px;display:block">설치된 센서</label>
@@ -634,6 +638,8 @@ function openEdit(l){
         p_address:bd.querySelector('#m_addr')?readAddr(bd,'m'):null,
         p_status:q('#e_status').value,
         p_stock:parseInt(q('#e_stock').value||'0',10), p_maintenance_until:q('#e_maint').value||null });
+      // MDM 기기번호(물리 태블릿 매칭). 별도 RPC — devices 행에 기록.
+      if(q('#e_mdm')) await rpc('admin_set_device_mdm',{p_location_id:l.id,p_mdm_number:q('#e_mdm').value.trim()||null});
       // 센서 구성은 별도 RPC. 켜진 것만 담는다 — 없는 키는 미설치로 읽힌다.
       const sensors={}; bd.querySelectorAll('[data-sensor]').forEach(cb=>{ if(cb.checked) sensors[cb.dataset.sensor]=true; });
       await rpc('admin_set_sensors',{p_location_id:l.id,p_sensors:sensors});
