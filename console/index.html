@@ -150,7 +150,10 @@ function deviceStateRows(l){
   const disp=`성공 ${s.dispense_ok??0} · 실패 ${s.dispense_fail??0}${s.dispense_last_error?` <span class="muted">(최근 ${esc(s.dispense_last_error)})</span>`:''}`;
   const touchAgo=ago(s.last_touch_at);
   const p=s.power||{};
-  const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`:`<span class="badge b-r">전원 없음</span> ${p.level>=0?`배터리 ${p.level}%`:''}`;
+  // kPad(배터리 없음)는 DC 전원인데도 plugged=0·level=100(게이지 고정)을 보고한다 — 판단 불가로 표시.
+  const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`
+    :(p.level>=95?`<span class="muted">판단 불가(배터리 없는 기종, 게이지 고정)</span>`
+    :`<span class="badge b-r">전원 없음 · 배터리 ${p.level}%</span>`);
   return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-');
 }
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
