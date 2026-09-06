@@ -175,6 +175,24 @@ async function renderDashboard(){
   body.innerHTML=`<div id="filters"></div><div id="stats"></div><div id="table"></div>`;
   renderFilters(); renderAll();
 }
+// ── 자동 갱신 ──
+// 켜 둔 화면이 옛 상태로 남는 문제(2026-09-06: 앱 2.1.20 배포·기기 복귀가 화면엔
+// 2.1.18·오프라인으로 보임). renderDashboard 는 필터·페이지를 초기화하는 전체
+// 재그리기라 자동으로 돌리면 보고 있던 조건이 날아간다. 그래서 데이터만 다시 받아
+// 표·통계를 다시 그리는 조용한 갱신을 따로 둔다. 탭이 보일 때만 60초마다, 탭으로
+// 돌아오면 즉시. 필터 입력 중이면 필터 카드는 건드리지 않는다(입력이 지워지므로).
+const REFRESH_MS=60000;
+async function refreshFleet(){
+  if(!document.getElementById('table')) return;          // 목록 화면이 아닐 때(상세·편집·설정)
+  let locs; try{ locs=await rpc('fleet_locations'); }catch(e){ return; }  // 실패는 다음 주기에
+  if(!document.getElementById('table')) return;          // 받는 사이 화면이 바뀌었으면 버린다
+  state.locs=locs; state.lastRef=fmtDt(new Date().toISOString()).slice(6);
+  const fl=document.getElementById('filters');
+  if(fl && !fl.contains(document.activeElement)) renderFilters();
+  renderAll();
+}
+setInterval(()=>{ if(!document.hidden) refreshFleet(); }, REFRESH_MS);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshFleet(); });
 // 화장실이 있는 지역만 고르게 한다. 전국 228개를 다 늘어놓으면 대부분이
 // 결과 0건이라 고를수록 헛수고가 된다. 개수를 함께 보여 준다.
 function regions(){
@@ -295,7 +313,8 @@ function renderTable(){
     <div class="tbar"><h2>화장실 목록 <span class="muted" style="font-weight:400">총 ${total}건</span></h2>
       <div class="tools">
         <select id="ps">${[10,20,50,100].map(n=>`<option ${n===ps?'selected':''} value="${n}">${n}개씩 보기</option>`).join('')}</select>
-        <button class="btn sm line" id="refresh">새로고침</button>
+        <button class="btn sm line" id="refresh" title="60초마다 자동 갱신됩니다">새로고침</button>
+        <span class="muted" style="font-size:12px">갱신 ${state.lastRef||fmtDt(new Date().toISOString()).slice(6)}</span>
         ${state.role==='platform_admin'?'<button class="btn sm line" id="settings">⚙ 설정</button>':''}
         ${state.role==='platform_admin'?'<button class="btn sm line" id="operators">👤 운영자</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
@@ -311,7 +330,8 @@ function renderTable(){
   </div>`;
   const t=document.getElementById('table');
   t.querySelector('#ps').onchange=e=>{ state.pageSize=+e.target.value; state.page=1; renderTable(); };
-  t.querySelector('#refresh').onclick=renderDashboard;
+  // 버튼도 조용한 갱신: 보고 있던 필터·페이지를 유지한 채 데이터만 새로 받는다.
+  t.querySelector('#refresh').onclick=refreshFleet;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
   const op=t.querySelector('#operators'); if(op) op.onclick=renderOperators;
