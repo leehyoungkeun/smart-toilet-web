@@ -140,6 +140,19 @@ function fmtDate(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,
 function fmtDateTime(iso){if(!iso)return'';try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${p(n.getMonth()+1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;}catch{return'';}}
 function fmtDt(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${p(n.getMonth()+1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;}catch{return'-';}}
 function defFilters(){return{q:'',region:'',sigungu:'',status:'',online:'',stock:'',maint:'',from:null,to:null};}
+// 앱 2.1.22+ 가 하트비트에 실어 보내는 "기기 옆 상태"(devices.state). 하트비트가 정상이어도
+// 보드가 죽고, 배출이 실패하고, 화면 터치가 며칠째 없고, 전원이 빠져 있을 수 있다 — 그걸 보여준다.
+function deviceStateRows(l){
+  const s=l.device_state; if(!s) return '';
+  const ago=iso=>{ if(!iso) return null; const m=Math.round((Date.now()-new Date(iso))/60000); return m<1?'방금':m<60?`${m}분 전`:m<1440?`${Math.round(m/60)}시간 전`:`${Math.round(m/1440)}일 전`; };
+  const boardAgo=ago(s.board_seen_at);
+  const board=s.board_connected?`<span class="badge b-g">연결</span> ${boardAgo?`응답 ${boardAgo}`:''}`:`<span class="badge b-r">미연결</span>${boardAgo?` <span class="muted">마지막 ${boardAgo}</span>`:''}`;
+  const disp=`성공 ${s.dispense_ok??0} · 실패 ${s.dispense_fail??0}${s.dispense_last_error?` <span class="muted">(최근 ${esc(s.dispense_last_error)})</span>`:''}`;
+  const touchAgo=ago(s.last_touch_at);
+  const p=s.power||{};
+  const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`:`<span class="badge b-r">전원 없음</span> ${p.level>=0?`배터리 ${p.level}%`:''}`;
+  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-');
+}
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
   const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
   const days=Math.round((due-t)/86400000);
@@ -527,6 +540,7 @@ function overviewHtml(l,admin){
       ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
       ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
       ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
+      ${deviceStateRows(l)}
       ${row('등록일',fmtDate(l.created_at))}
     </div>
     <!-- 설정은 따로 조회한다. 목록 RPC 에 다 실으면 화장실 수백 개를 부를
