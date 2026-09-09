@@ -154,7 +154,11 @@ function deviceStateRows(l){
   const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`
     :(p.level>=95?`<span class="muted">판단 불가(배터리 없는 기종, 게이지 고정)</span>`
     :`<span class="badge b-r">전원 없음 · 배터리 ${p.level}%</span>`);
-  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-');
+  // 신원 복구(2.1.23+): 세션이 사라져 기기가 복구 비밀로 자기 행을 되찾은 이력. 0회가 정상.
+  // 반복되면 그 현장의 통신이 자주 끊긴다는 뜻(망 단절 1h+ 마다 한 번).
+  const rc=l.device_reclaim_count||0;
+  const reclaim=rc?`<span class="badge b-y">${rc}회</span> 마지막 ${ago(l.device_reclaimed_at)||'-'}`:'<span class="muted">없음</span>';
+  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-')+row('신원 복구',reclaim);
 }
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
   const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
