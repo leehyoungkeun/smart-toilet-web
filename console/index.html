@@ -134,6 +134,9 @@ const ROLE_LABEL={platform_admin:'플랫폼 관리자(전체)',org_admin:'지자
 const STATUS={active:{l:'운영중',c:'b-g'},maintenance:{l:'점검중',c:'b-a'},inactive:{l:'중지',c:'b-x'}};
 const canAdd=()=>state.role==='platform_admin'||state.role==='org_admin';
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 키/값 한 줄. 개요·설정 말고 deviceStateRows 같은 바깥 함수에서도 쓴다 —
+// 함수 안에만 두면 거기서 ReferenceError 가 나고 개요 전체가 빈 화면이 된다.
+const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
 async function rpc(fn,body){const{data,error}=await supabase.rpc(fn,body||{});if(error)throw error;return data;}
 function download(name,text){const b=new Blob([text],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}
 function fmtDate(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0');return `${n.getFullYear()}. ${p(n.getMonth()+1)}. ${p(n.getDate())}`;}catch{return'';}}
@@ -458,7 +461,11 @@ function renderDetail(){
 
 async function renderTab(l, admin){
   const el=document.getElementById('tab');
-  if(state.tab==='overview'){ el.innerHTML=overviewHtml(l,admin); wireOverview(l); return; }
+  // 개요 그리기가 터져도 화면이 통째로 비면 원인을 볼 단서가 없다. 이유를 적어 둔다.
+  if(state.tab==='overview'){
+    try{ el.innerHTML=overviewHtml(l,admin); wireOverview(l); }
+    catch(e){ el.innerHTML=`<div class="err">개요를 그리지 못했습니다: ${esc(e.message)}</div>`; console.error(e); }
+    return; }
   const tab=LOG_TABS.find(t=>t.key===state.tab);
   const presets = tab.env ? [['오늘',1],['3일',3],['7일',7]] : [['오늘',1],['7일',7],['30일',30],['전체','null']];
   if(tab.env && (state.range===null || state.range>7)) state.range=3;
@@ -545,7 +552,6 @@ function exportCsv(tab,rows,l){
 }
 function overviewHtml(l,admin){
   const st=STATUS[l.status]||{l:l.status};
-  const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
   // 숫자만 넉 장 있으면 어느 것이 나쁜 상태인지 읽어야 안다. 아이콘 색으로
   // 먼저 보이게 한다 — 재고 부족과 미처리 민원은 붉게.
   const card=(icon,tone,v,lab)=>`<div class="stat">
@@ -591,7 +597,6 @@ function overviewHtml(l,admin){
 function settingsHtml(l,d){
   const i=(d&&d.info)||{}, se=(d&&d.sensors)||{}, fe=(d&&d.features)||{};
   const h=i.hours||{}, st=i.stalls||{}, ds=i.dispense||{};
-  const row=(k,v)=>`<div class="k">${k}</div><div>${v}</div>`;
   const on=(map,keys)=>{ const y=keys.filter(([k])=>map[k]); return y.length
     ? y.map(([,lab])=>`<span class="badge b-g" style="margin-right:6px">${esc(lab)}</span>`).join('')
     : '<span class="muted">없음</span>'; };
