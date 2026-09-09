@@ -158,7 +158,20 @@ function deviceStateRows(l){
   // 반복되면 그 현장의 통신이 자주 끊긴다는 뜻(망 단절 1h+ 마다 한 번).
   const rc=l.device_reclaim_count||0;
   const reclaim=rc?`<span class="badge b-y">${rc}회</span> 마지막 ${ago(l.device_reclaimed_at)||'-'}`:'<span class="muted">없음</span>';
-  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-')+row('신원 복구',reclaim);
+  // 2.1.25+: 통신·시계·저장공간·온도·업타임 — "왜 오프라인인가" 를 볼 재료. 옛 앱은 device 가 없다.
+  const d=s.device; let extra='';
+  if(d){
+    const tr={wifi:'Wi-Fi',cellular:'LTE',ethernet:'유선',none:'없음',other:'기타'}[d.net_transport]||'-';
+    const band=d.wifi_freq?(d.wifi_freq>=5000?' 5GHz':' 2.4GHz'):'';
+    const rssi=d.wifi_rssi!=null?` 신호 ${d.wifi_rssi}dBm${d.wifi_rssi<-75?' <span class="badge b-y">약함</span>':''}`:'';
+    const net=`${tr}${band}${rssi}${d.net_validated===false?' <span class="badge b-r">인터넷 미검증</span>':''}`;
+    const off=s.clock_offset_sec; const clock=off==null?'-':(Math.abs(off)>300?`<span class="badge b-r">${Math.round(off/60)}분 어긋남</span>`:`<span class="badge b-g">정상</span> ${off>=0?'+':''}${off}초`);
+    const st=d.storage_free_mb!=null?`${(d.storage_free_mb/1024).toFixed(1)}GB 남음 / ${(d.storage_total_mb/1024).toFixed(0)}GB${d.storage_free_mb<500?' <span class="badge b-r">부족</span>':''}`:'-';
+    const temp=d.battery_temp_c!=null?`${d.battery_temp_c}°C${d.battery_temp_c>=45?' <span class="badge b-r">과열</span>':''}`:'-';
+    const up=d.uptime_sec!=null?(d.uptime_sec<3600?`${Math.round(d.uptime_sec/60)}분`:d.uptime_sec<86400?`${(d.uptime_sec/3600).toFixed(1)}시간`:`${(d.uptime_sec/86400).toFixed(1)}일`):'-';
+    extra=row('통신',net)+row('시계',clock)+row('저장공간',st)+row('온도',temp)+row('가동 시간',`${up}${d.boot_reason?` <span class="muted">(부팅: ${esc(d.boot_reason)})</span>`:''}`);
+  }
+  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-')+row('신원 복구',reclaim)+extra;
 }
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
   const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
