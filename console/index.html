@@ -142,6 +142,18 @@ function fmtDt(iso){try{const n=new Date(iso);const p=x=>String(x).padStart(2,'0
 function defFilters(){return{q:'',region:'',sigungu:'',status:'',online:'',stock:'',maint:'',from:null,to:null};}
 // 앱 2.1.22+ 가 하트비트에 실어 보내는 "기기 옆 상태"(devices.state). 하트비트가 정상이어도
 // 보드가 죽고, 배출이 실패하고, 화면 터치가 며칠째 없고, 전원이 빠져 있을 수 있다 — 그걸 보여준다.
+// 통신 환경(운영자 입력) + Headwind 반영 상태. 반영은 서버 스크립트가 2분마다 한다.
+function netRow(l){
+  const mode={auto:'자동',wifi:'Wi-Fi',lte:'LTE'}[l.device_net_mode||'auto']||'자동';
+  const ssid=l.device_wifi_ssid?` · ${esc(l.device_wifi_ssid)}${l.device_wifi_psk_set?'':' <span class="badge b-y">비밀번호 없음</span>'}`:'';
+  let sync='';
+  if(l.device_net_updated_at){
+    if(!l.mdm_number) sync=' <span class="badge b-r">MDM 기기번호 필요</span>';
+    else if(l.device_net_synced_at && new Date(l.device_net_synced_at)>=new Date(l.device_net_updated_at)) sync=' <span class="badge b-g">기기 반영됨</span>';
+    else sync=' <span class="badge b-y">반영 대기(2분 내)</span>';
+  }
+  return `${mode}${ssid}${sync}`;
+}
 function deviceStateRows(l){
   const s=l.device_state; if(!s) return '';
   const ago=iso=>{ if(!iso) return null; const m=Math.round((Date.now()-new Date(iso))/60000); return m<1?'방금':m<60?`${m}분 전`:m<1440?`${Math.round(m/60)}시간 전`:`${Math.round(m/1440)}일 전`; };
@@ -558,6 +570,7 @@ function overviewHtml(l,admin){
       ${row('상태',esc(st.l))}
       ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
       ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
+      ${row('통신 환경',netRow(l))}
       ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
       ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
       ${deviceStateRows(l)}
@@ -650,6 +663,16 @@ function openEdit(l){
       <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
       <div><label class="f">MDM 기기번호 <span class="muted" style="font-weight:400">· 물리 태블릿 매칭</span></label><input id="e_mdm" value="${esc(l.mdm_number||'')}" placeholder="예: TEST0006"/></div>
     </div>
+    <label class="f" style="margin-top:14px;display:block">통신 환경 <span class="muted" style="font-weight:400">· 기기가 망을 잃었을 때 스스로 되살리는 방식</span></label>
+    <div class="grid2" style="margin-top:6px">
+      <div><label class="f">회선</label><select id="e_net_mode">
+        <option value="auto" ${(l.device_net_mode||'auto')==='auto'?'selected':''}>자동 (마지막 정상 회선으로 판단)</option>
+        <option value="wifi" ${l.device_net_mode==='wifi'?'selected':''}>Wi-Fi 현장</option>
+        <option value="lte" ${l.device_net_mode==='lte'?'selected':''}>LTE (SIM) 현장</option></select></div>
+      <div><label class="f">Wi-Fi 이름(SSID) <span class="muted" style="font-weight:400">· Wi-Fi 현장만</span></label><input id="e_net_ssid" value="${esc(l.device_wifi_ssid||'')}" placeholder="현장 공유기 이름"/></div>
+      <div><label class="f">Wi-Fi 비밀번호 <span class="muted" style="font-weight:400">· ${l.device_wifi_psk_set?'설정됨 · 바꿀 때만 입력':'미설정'}</span></label><input id="e_net_psk" type="password" autocomplete="new-password" placeholder="${l.device_wifi_psk_set?'(유지)':'현장 공유기 비밀번호'}"/></div>
+      <div style="font-size:12px;color:#414C63;align-self:end">저장하면 2분 안에 기기에 반영됩니다. 저장 네트워크가 사라져도 이 값으로 다시 붙습니다. LTE 현장은 이름·비밀번호를 비워 두세요.</div>
+    </div>
     <div id="e_info"><div class="muted" style="margin-top:14px">이용 안내 정보 불러오는 중…</div></div>
     <label class="f" style="margin-top:14px;display:block">설치된 센서</label>
     <div id="e_sensors" style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
@@ -694,6 +717,9 @@ function openEdit(l){
         p_stock:parseInt(q('#e_stock').value||'0',10), p_maintenance_until:q('#e_maint').value||null });
       // MDM 기기번호(물리 태블릿 매칭). 별도 RPC — devices 행에 기록.
       if(q('#e_mdm')) await rpc('admin_set_device_mdm',{p_location_id:l.id,p_mdm_number:q('#e_mdm').value.trim()||null});
+      // 통신 환경(런처 네트워크 워치독). 비밀번호 칸이 비면 기존 값 유지(null), 지우려면 이름을 비운다.
+      if(q('#e_net_mode')){ const ssid=q('#e_net_ssid').value.trim(); const psk=q('#e_net_psk').value;
+        await rpc('admin_set_device_network',{p_location_id:l.id,p_mode:q('#e_net_mode').value,p_ssid:ssid||null,p_psk:ssid?(psk||null):''}); }
       // 센서 구성은 별도 RPC. 켜진 것만 담는다 — 없는 키는 미설치로 읽힌다.
       const sensors={}; bd.querySelectorAll('[data-sensor]').forEach(cb=>{ if(cb.checked) sensors[cb.dataset.sensor]=true; });
       await rpc('admin_set_sensors',{p_location_id:l.id,p_sensors:sensors});
