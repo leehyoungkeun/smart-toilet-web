@@ -107,25 +107,27 @@
   .card.pad input, .card.pad select, .login input { width:100%; margin-bottom:2px; }
   .dbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
   .dbar h2 { margin:0; font-size:19px; }
-  /* 메뉴답게 — 알약 버튼이 아니라 아래쪽에 선이 그어지는 표준 탭 메뉴.
-     버튼처럼 보이면 '누르는 것' 이지 '지금 어디에 있는지' 를 말해 주지 않는다. */
-  .tabs2 { display:flex; gap:2px; flex-wrap:wrap; margin-bottom:16px; background:#fff;
-           padding:0 8px; border:1px solid #E7EBF3; border-radius:14px;
-           box-shadow:0 1px 3px rgba(20,40,80,.04); overflow:hidden; }
-  .tab2 { position:relative; display:flex; align-items:center; gap:7px; padding:14px 16px 12px;
-          font-size:14px; font-weight:600; color:#4A5468; cursor:pointer; user-select:none;
-          border-bottom:3px solid transparent; transition:color .13s, background .13s, border-color .13s; }
-  .tab2 svg { width:16px; height:16px; opacity:.65; flex:none; }
-  .tab2:hover { background:#F6F8FD; color:#22314F; }
-  .tab2:hover svg { opacity:.95; }
-  .tab2.on { color:#3245D6; border-bottom-color:#4353E0; background:#F7F9FF; }
+  /* 세그먼트 컨트롤(2026-09-11). 연한 트랙 위에 알약이 놓이고, 현재 탭만 흰 알약으로 떠올라
+     "지금 어디" 가 한눈에 보인다. 아이콘은 현재 탭에서만 진하게, 건수는 작은 알약으로.
+     좁은 화면은 줄바꿈 대신 가로 스크롤(줄이 바뀌면 메뉴가 두 층이 되어 위치감이 깨진다). */
+  .tabs2 { display:flex; gap:4px; margin-bottom:18px; background:#EEF1F7; padding:5px;
+           border-radius:14px; overflow-x:auto; scrollbar-width:none; }
+  .tabs2::-webkit-scrollbar { display:none; }
+  .tab2 { position:relative; display:flex; align-items:center; gap:8px; padding:10px 16px; flex:none;
+          border-radius:10px; font-size:14px; font-weight:600; color:#5A6580; cursor:pointer; user-select:none;
+          transition:color .15s, background .15s, box-shadow .15s, transform .15s; }
+  .tab2 svg { width:16px; height:16px; opacity:.6; flex:none; transition:opacity .15s; }
+  .tab2:hover { color:#22314F; background:rgba(255,255,255,.55); }
+  .tab2:hover svg { opacity:.9; }
+  .tab2:active { transform:scale(.98); }
+  .tab2.on { color:#2F40D0; background:#fff; box-shadow:0 1px 2px rgba(20,40,80,.08), 0 3px 10px rgba(67,83,224,.12); }
   .tab2.on svg { opacity:1; }
   /* 탭 안 건수 — 0 이면 아예 달지 않는다. 0을 붙이면 눈이 매번 확인한다. */
-  .tab2 .n { min-width:19px; height:19px; padding:0 5px; border-radius:9px; background:#EEF1F8; color:#36405A;
+  .tab2 .n { min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:#DEE3EF; color:#36405A;
              font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
-  .tab2 .n.hot { background:#FBE3E3; color:#C0392B; }
-  .tab2.on .n { background:#E3E7FC; color:#3245D6; }
-  .tab2.on .n.hot { background:#FBE3E3; color:#C0392B; }
+  .tab2 .n.hot { background:#E85D5D; color:#fff; box-shadow:0 0 0 2px rgba(232,93,93,.18); }
+  .tab2.on .n { background:#E3E7FC; color:#2F40D0; }
+  .tab2.on .n.hot { background:#E85D5D; color:#fff; }
   .tab2.on { color:#fff; background:linear-gradient(90deg,#2C6CD0,#4353E0); box-shadow:0 3px 8px rgba(44,108,208,.28); }
   .rbar { display:flex; align-items:center; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
   .rbar input[type=date] { padding:5px 8px; font-size:13px; border:1px solid #DCE2EE; border-radius:8px; background:#fff; }
