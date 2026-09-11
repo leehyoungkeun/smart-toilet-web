@@ -458,7 +458,7 @@ const LOG_TABS = [
   { key:'cleaning', label:'청소', table:'cleaning_logs', ts:'cleaned_at',
     cols:[['cleaned_at','시각','dt'],['cleaner','담당자'],['note','비고']] },
   { key:'dispense', label:'지급', table:'dispense_logs', ts:'dispensed_at',
-    cols:[['dispensed_at','시각','dt'],['item','품목'],['quantity','수량'],['method','방식'],['status','상태']] },
+    cols:[['dispensed_at','시각','dt'],['item','품목'],['quantity','수량'],['method','방식'],['status','상태'],['claimant_id','수령 폰','claim']] },
   // 연락처는 가려서 보여준다(mask_phone). 명단을 통째로 볼 이유가 있는
   // 사람은 없다 — 회신은 시스템이 보낸다.
   { key:'complaints', label:'민원', table:'complaints', ts:'created_at', rpc:'location_complaints',
@@ -539,6 +539,7 @@ async function renderTab(l, admin){
   // 환경 탭은 표 위에 지표 타일·그래프가 먼저 온다(자리를 먼저 잡아 두고 따로 채운다 — 표와 그래프가
   // 서로를 기다리지 않게). 표는 서버 페이지네이션 — 예전엔 1000행 상한에 3일치부터 잘렸다.
   if(tab.env){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="envviz"></div>'); renderEnvViz(l); }
+  if(tab.key==='dispense'){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="dispviz"></div>'); renderDispenseViz(l); }
   await refreshLog(tab, l);
 }
 
@@ -616,8 +617,10 @@ function fmtCell(tabKey, field, v){
   if(tabKey==='satisfaction'&&field==='rating'){ const n=+v; return `<span class="stars">${'★'.repeat(n)}<span class="star-off">${'★'.repeat(5-n)}</span></span> <span class="muted">${n}.0</span>`; }
   return esc(String(v));
 }
-function cellHtml(tab,c,r){ if(c[2]==='dt'){ const v=r[c[0]]; return v?`<span class="nowrap">${esc(fmtDt(v))}</span>`:'<span class="muted">-</span>'; } return fmtCell(tab.key,c[0],r[c[0]]); }
-function cellText(tab,c,r){ const v=r[c[0]]; if(v==null||v==='') return ''; if(c[2]==='dt') return fmtDt(v); return fmtCell(tab.key,c[0],v).replace(/<[^>]*>/g,'').trim(); }
+function cellHtml(tab,c,r){ if(c[2]==='dt'){ const v=r[c[0]]; return v?`<span class="nowrap">${esc(fmtDt(v))}</span>`:'<span class="muted">-</span>'; }
+  if(c[2]==='claim'){ const v=r[c[0]]; return v?`<code title="폰 브라우저가 만든 난수 ID — 사람이 아니라 같은 폰인지만 구분">${esc(String(v).slice(0,8))}…</code>`:'<span class="muted">-</span>'; }
+  return fmtCell(tab.key,c[0],r[c[0]]); }
+function cellText(tab,c,r){ const v=r[c[0]]; if(v==null||v==='') return ''; if(c[2]==='dt') return fmtDt(v); if(c[2]==='claim') return String(v).slice(0,8); return fmtCell(tab.key,c[0],v).replace(/<[^>]*>/g,'').trim(); }
 function logTable(tab,rows,total,capped){
   const ps=state.lps, pages=Math.max(1,Math.ceil(total/ps)), p=Math.min(state.lpage,pages);
   const head=tab.cols.map(c=>`<th>${esc(c[1])}</th>`).join('');
@@ -661,6 +664,38 @@ const ENV_METRICS=[
   { key:'pm25',        s:'pm',   label:'PM2.5',  unit:'µg/m³', band:[0,35], bad:75, digits:1 },
 ];
 function envGrade(m,v){ if(v==null) return null; if(m.bad!=null && v>=m.bad) return 'bad'; if(v<m.band[0]||v>m.band[1]) return 'warn'; return 'ok'; }
+// ── 지급 탭: 요약 타일 ────────────────────────────────────────
+// 개인정보 없이 볼 수 있는 것만: 지급 건수, 고유 폰(claimant_id — 폰 브라우저 난수, 사람 수의 근사치),
+// 전환율(QR 스캔 세션 중 실제 지급까지 간 비율), 만료·취소. 전환율이 낮으면 "찍었는데 못 받아간 시민" 이
+// 그만큼이다 — 만료 시간·폰 페이지 속도·배출기 앞 동선을 볼 신호.
+async function renderDispenseViz(l){
+  const box=document.getElementById('dispviz'); if(!box) return;
+  const {a,b}=logBounds();
+  const rng=q=>{ if(a) q=q.gte('created_at',a.toISOString()); if(b) q=q.lte('created_at',b.toISOString()); return q; };
+  const cnt=async(st)=>{ let q=supabase.from('dispense_sessions').select('id',{count:'exact',head:true}).eq('location_id',l.id); if(st) q=q.eq('status',st); const {count,error}=await rng(q); return error?null:(count||0); };
+  try{
+    // 고유 폰: claimant_id 만 1000행씩 받아 센다(화장실 하나의 기간 지급이라 크지 않다).
+    const ids=new Set(); let total=0;
+    for(let off=0; off<20000; off+=1000){
+      let q=supabase.from('dispense_logs').select('claimant_id').eq('location_id',l.id).order('dispensed_at',{ascending:false});
+      if(a) q=q.gte('dispensed_at',a.toISOString()); if(b) q=q.lte('dispensed_at',b.toISOString());
+      const {data,error}=await q.range(off,off+999); if(error) throw new Error(error.message);
+      (data||[]).forEach(r=>{ total++; if(r.claimant_id) ids.add(r.claimant_id); });
+      if(!data||data.length<1000) break;
+    }
+    const [sess,done,exp,can]=await Promise.all([cnt(null),cnt('dispensed'),cnt('expired'),cnt('cancelled')]);
+    const conv=sess?Math.round((done||0)/sess*100):null;
+    const convTone=conv==null?'':(conv>=70?'':conv>=40?'warn':'bad');
+    const tile=(lab,v,sub,tone='')=>`<div class="etile ${tone}"><div class="l">${lab}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+    box.innerHTML=`<div class="etiles">
+      ${tile('지급', `${total.toLocaleString()}<span class="muted" style="font-size:14px;font-weight:600"> 건</span>`, '기간 내 실제 배출')}
+      ${tile('고유 폰', `${ids.size.toLocaleString()}<span class="muted" style="font-size:14px;font-weight:600"> 대</span>`, ids.size?`폰당 평균 ${(total/ids.size).toFixed(1)}회 · 사람 수의 근사치`:'수령 폰 기록 없음')}
+      ${tile('전환율', conv==null?'-':`${conv}<span class="muted" style="font-size:14px;font-weight:600"> %</span>`, sess==null?'세션 조회 불가':`QR 스캔 ${sess.toLocaleString()}건 중 지급 ${(done||0).toLocaleString()}건`, convTone)}
+      ${tile('못 받아감', `${((exp||0)+(can||0)).toLocaleString()}<span class="muted" style="font-size:14px;font-weight:600"> 건</span>`, `만료 ${(exp||0).toLocaleString()} · 취소 ${(can||0).toLocaleString()}`, (exp||0)+(can||0)>(done||0)?'warn':'')}
+    </div>
+    <div class="muted" style="font-size:12px;margin:-4px 2px 14px">수령 폰 = 시민 폰 브라우저가 만든 난수 ID. 이름·연락처는 저장하지 않는다(무저장 설계). 폰을 바꾸면 새 폰으로 센다.</div>`;
+  }catch(e){ box.innerHTML=`<div class="err">지급 요약 조회 실패: ${esc(e.message)}</div>`; }
+}
 async function renderEnvViz(l){
   const box=document.getElementById('envviz'); if(!box) return;
   const {a,b}=logBounds(); const from=a||new Date(Date.now()-3*86400000), to=b||new Date();
