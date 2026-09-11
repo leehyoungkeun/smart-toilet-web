@@ -89,6 +89,25 @@
   .kv .k { color:#48526A; }
   /* 개요 카드 격자: 위 줄 = 기본 정보 · 이용 안내/설치 구성, 아래 줄 = 태블릿·통신 · 센서·배출.
      카드 높이는 줄 안에서 맞춘다(align-items:stretch 기본). 좁으면 한 단. */
+  /* 환경 탭: 지표 타일 4장 + 그래프 2×2. 타일은 개요의 stat 과 같은 결. */
+  .etiles { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px; }
+  .etile { background:#fff; border:1px solid #E5E9F2; border-radius:14px; padding:14px 16px; }
+  .etile .l { font-size:13px; color:#48526A; font-weight:600; }
+  .etile .v { font-size:24px; font-weight:800; color:#1F2C48; margin:4px 0 2px; display:flex; align-items:center; gap:8px; }
+  .etile .s { font-size:12px; color:#6B7590; } .etile .s b { color:#36405A; font-weight:600; }
+  .etile.warn { border-color:#F0D9AF; } .etile.bad { border-color:#F3C2C2; background:#FFF8F8; }
+  .envgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; position:relative; }
+  .ecard { background:#fff; border:1px solid #E5E9F2; border-radius:14px; padding:12px 14px 6px; }
+  .ecard .eh { display:flex; align-items:baseline; gap:6px; font-size:14px; color:#22314F; margin-bottom:4px; }
+  .ecard .eh .ev { margin-left:auto; font-size:12px; font-variant-numeric:tabular-nums; }
+  .esvg { width:100%; height:190px; display:block; font-family:inherit; touch-action:none; }
+  .etip { position:absolute; pointer-events:none; background:#1F2C48; color:#fff; font-size:12px; padding:5px 9px; border-radius:7px; white-space:nowrap; box-shadow:0 4px 12px rgba(20,40,80,.18); z-index:5; }
+  #envviz { position:relative; }
+  .pgnums { display:inline-flex; gap:3px; align-items:center; }
+  .pgn { min-width:30px; height:30px; padding:0 6px; border-radius:8px; border:1px solid #DDE3EE; background:#fff; color:#2B3A57; font-weight:600; cursor:pointer; }
+  .pgn.on { background:#4353E0; color:#fff; border-color:#4353E0; }
+  .pg select { height:30px; border-radius:8px; border:1px solid #DDE3EE; padding:0 8px; margin-right:6px; }
+  @media (max-width:900px){ .etiles { grid-template-columns:repeat(2,1fr); } .envgrid { grid-template-columns:1fr; } }
   .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .ovgrid > .card, .ovgrid > #ovset > .card { height:100%; box-sizing:border-box; }
   .ovgrid .kv { grid-template-columns:118px 1fr; margin-top:14px; }
@@ -153,7 +172,7 @@ const SUPABASE_URL='https://jrcvrlyvkdoxtjlhmapm.supabase.co';
 const SUPABASE_KEY='sb_publishable_JD6Mcz3_Hk2N5jX0zauvLg_pGihCjYn';
 const supabase=createClient(SUPABASE_URL,SUPABASE_KEY);
 const app=document.getElementById('app');
-const state={ role:null, profile:{}, orgs:[], regions:[], locs:[], filters:{}, page:1, pageSize:20 };
+const state={ role:null, profile:{}, orgs:[], regions:[], locs:[], filters:{}, page:1, pageSize:20, lpage:1, lps:50 };
 const ROLE_LABEL={platform_admin:'플랫폼 관리자(전체)',org_admin:'지자체 관리자',operator:'운영자'};
 const STATUS={active:{l:'운영중',c:'b-g'},maintenance:{l:'점검중',c:'b-a'},inactive:{l:'중지',c:'b-x'}};
 const canAdd=()=>state.role==='platform_admin'||state.role==='org_admin';
@@ -455,7 +474,7 @@ const LOG_TABS = [
     cols:[['recorded_at','시각','dt'],['temperature','온도'],['humidity','습도'],['ammonia_ppm','암모니아'],['pm25','PM2.5']] },
 ];
 
-function openDetail(id){ state.detailId=id; state.tab='overview'; state.range=30; state.lfrom=state.lto=null; renderDetail(); }
+function openDetail(id){ state.detailId=id; state.tab='overview'; state.range=30; state.lfrom=state.lto=null; state.lpage=1; renderDetail(); }
 
 function renderDetail(){
   const l=state.locs.find(x=>String(x.id)===String(state.detailId));
@@ -494,8 +513,8 @@ async function renderTab(l, admin){
     catch(e){ el.innerHTML=`<div class="err">개요를 그리지 못했습니다: ${esc(e.message)}</div>`; console.error(e); }
     return; }
   const tab=LOG_TABS.find(t=>t.key===state.tab);
-  const presets = tab.env ? [['오늘',1],['3일',3],['7일',7]] : [['오늘',1],['7일',7],['30일',30],['전체','null']];
-  if(tab.env && (state.range===null || state.range>7)) state.range=3;
+  const presets = tab.env ? [['오늘',1],['3일',3],['7일',7],['30일',30]] : [['오늘',1],['7일',7],['30일',30],['전체','null']];
+  if(tab.env && state.range===null) state.range=3;
   // 지난 달치를 보려면 며칠 전인지 세어야 했다. 정산·보고는 '몇 일 전' 이
   // 아니라 '몇 월 며칠부터' 로 잡히므로 날짜를 직접 넣을 수 있어야 한다.
   const custom = !!(state.lfrom || state.lto);
@@ -509,44 +528,78 @@ async function renderTab(l, admin){
     <span style="flex:1"></span><button class="btn sm line" id="csv">CSV 내보내기</button></div>
     <div id="logbody" class="muted" style="padding:14px">불러오는 중…</div>`;
   el.querySelectorAll('.chip[data-d]').forEach(b=>b.onclick=()=>{
-    state.range=b.dataset.d==='null'?null:+b.dataset.d; state.lfrom=state.lto=null; renderDetail(); });
+    state.range=b.dataset.d==='null'?null:+b.dataset.d; state.lfrom=state.lto=null; state.lpage=1; renderDetail(); });
   el.querySelector('#lapply').onclick=()=>{
     const a=el.querySelector('#lfrom').value, b=el.querySelector('#lto').value;
     if(!a&&!b){ alert('시작일이나 종료일 중 하나는 넣어 주세요.'); return; }
     if(a&&b&&a>b){ alert('시작일이 종료일보다 뒤입니다.'); return; }
-    state.lfrom=a||null; state.lto=b||null; renderDetail(); };
+    state.lfrom=a||null; state.lto=b||null; state.lpage=1; renderDetail(); };
   const lc=el.querySelector('#lclear');
-  if(lc) lc.onclick=()=>{ state.lfrom=state.lto=null; renderDetail(); };
-  const res=await fetchLog(tab);
-  const lb=document.getElementById('logbody');
-  if(res.error){ lb.innerHTML=`<div class="err">조회 실패: ${esc(res.error)}</div>`; return; }
-  lb.outerHTML=logTable(tab,res.rows);
-  document.getElementById('csv').onclick=()=>exportCsv(tab,res.rows,l);
+  if(lc) lc.onclick=()=>{ state.lfrom=state.lto=null; state.lpage=1; renderDetail(); };
+  // 환경 탭은 표 위에 지표 타일·그래프가 먼저 온다(자리를 먼저 잡아 두고 따로 채운다 — 표와 그래프가
+  // 서로를 기다리지 않게). 표는 서버 페이지네이션 — 예전엔 1000행 상한에 3일치부터 잘렸다.
+  if(tab.env){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="envviz"></div>'); renderEnvViz(l); }
+  await refreshLog(tab, l);
 }
 
+// 표만 다시 그린다(페이지 이동·건수 변경). 기간 바꾸기는 renderDetail 이 맡는다(그래프도 같이 바뀌어야 하므로).
+async function refreshLog(tab, l){
+  const res=await fetchLog(tab);
+  const lb=document.getElementById('logbody'); if(!lb) return;
+  if(res.error){ lb.innerHTML=`<div class="err">조회 실패: ${esc(res.error)}</div>`; return; }
+  lb.outerHTML=logTable(tab,res.rows,res.total,res.capped);
+  const nb=document.getElementById('logbody');
+  const go=p=>{ state.lpage=p; refreshLog(tab,l); };
+  const pages=Math.max(1,Math.ceil(res.total/state.lps));
+  nb.querySelector('#lprev').onclick=()=>go(Math.max(1,state.lpage-1));
+  nb.querySelector('#lnext').onclick=()=>go(Math.min(pages,state.lpage+1));
+  nb.querySelector('#lps').onchange=e=>{ state.lps=+e.target.value; go(1); };
+  nb.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>go(+b.dataset.p));
+  const csv=document.getElementById('csv'); if(csv) csv.onclick=()=>exportCsvAll(tab,l);
+}
+
+// 기간 경계. 날짜를 직접 넣었으면 그것이 우선, 아니면 '며칠 전부터 지금까지'.
+function logBounds(){
+  const a=state.lfrom?new Date(state.lfrom+'T00:00:00'):(state.range?new Date(Date.now()-state.range*86400000):null);
+  const b=state.lto?new Date(state.lto+'T23:59:59.999'):null;
+  return {a,b};
+}
 async function fetchLog(tab){
+  const ps=state.lps, from=(state.lpage-1)*ps, to=from+ps-1, {a,b}=logBounds();
   // 연락처가 있는 표는 직접 select 하지 않는다. 원본 번호가 그대로 내려온다.
-  // 가려서 주는 RPC 를 타고, 기간은 받아 온 뒤 걸러 낸다.
+  // 가려서 주는 RPC 를 타고, 기간·페이지는 받아 온 뒤 나눈다(RPC 상한 1000).
   if(tab.rpc){
     try{
       const rows=await rpc(tab.rpc,{p_location:state.detailId,p_limit:1000});
-      const a=state.lfrom?new Date(state.lfrom+'T00:00:00'):(state.range?new Date(Date.now()-state.range*86400000):null);
-      const b=state.lto?new Date(state.lto+'T23:59:59.999'):null;
-      return {rows:(rows||[]).filter(r=>{ const t=new Date(r[tab.ts]);
-        return (!a||t>=a) && (!b||t<=b); })};
+      const all=(rows||[]).filter(r=>{ const t=new Date(r[tab.ts]); return (!a||t>=a) && (!b||t<=b); });
+      return {rows:all.slice(from,to+1), total:all.length, capped:(rows||[]).length>=1000};
     }catch(e){ return {error:e.message}; }
   }
-  let q=supabase.from(tab.table).select('*').eq('location_id',state.detailId).order(tab.ts,{ascending:false}).limit(1000);
-  if(state.lfrom || state.lto){
-    // 날짜를 직접 넣었으면 그것이 우선이다. 종료일은 그날 끝까지 포함해야
-    // 한다 — 안 그러면 마지막 날 기록이 통째로 빠진다.
-    if(state.lfrom) q=q.gte(tab.ts, new Date(state.lfrom+'T00:00:00').toISOString());
-    if(state.lto)   q=q.lte(tab.ts, new Date(state.lto+'T23:59:59.999').toISOString());
-  } else if(state.range){
-    const from=new Date(Date.now()-state.range*86400000); q=q.gte(tab.ts, from.toISOString());
+  let q=supabase.from(tab.table).select('*',{count:'exact'}).eq('location_id',state.detailId).order(tab.ts,{ascending:false});
+  if(a) q=q.gte(tab.ts,a.toISOString());
+  if(b) q=q.lte(tab.ts,b.toISOString());   // 종료일은 그날 끝까지 — 안 그러면 마지막 날 기록이 통째로 빠진다
+  const {data,error,count}=await q.range(from,to);
+  if(error){
+    // 페이지가 범위를 넘으면(건수가 줄었을 때) 1페이지로 되돌린다.
+    if(/range/i.test(error.message) && state.lpage>1){ state.lpage=1; return fetchLog(tab); }
+    return {error:error.message};
   }
-  const {data,error}=await q;
-  return error?{error:error.message}:{rows:data||[]};
+  return {rows:data||[], total:count??(data||[]).length};
+}
+// CSV 는 화면의 한 페이지가 아니라 기간 전체. 1000행씩 이어 받는다(상한 2만 — 그 이상은 기간을 나눠 받는 게 맞다).
+async function fetchAllRows(tab){
+  const {a,b}=logBounds();
+  if(tab.rpc){
+    const rows=await rpc(tab.rpc,{p_location:state.detailId,p_limit:1000});
+    return (rows||[]).filter(r=>{ const t=new Date(r[tab.ts]); return (!a||t>=a) && (!b||t<=b); });
+  }
+  const out=[]; for(let off=0; off<20000; off+=1000){
+    let q=supabase.from(tab.table).select('*').eq('location_id',state.detailId).order(tab.ts,{ascending:false});
+    if(a) q=q.gte(tab.ts,a.toISOString()); if(b) q=q.lte(tab.ts,b.toISOString());
+    const {data,error}=await q.range(off,off+999); if(error) throw new Error(error.message);
+    out.push(...(data||[])); if(!data||data.length<1000) break;
+  }
+  return out;
 }
 function badge(label,cls){ return `<span class="badge ${cls}">${esc(label)}</span>`; }
 const CAT_KO = { cleanliness:'청결', facility:'시설', safety:'안전', supplies:'비품' };
@@ -565,17 +618,150 @@ function fmtCell(tabKey, field, v){
 }
 function cellHtml(tab,c,r){ if(c[2]==='dt'){ const v=r[c[0]]; return v?`<span class="nowrap">${esc(fmtDt(v))}</span>`:'<span class="muted">-</span>'; } return fmtCell(tab.key,c[0],r[c[0]]); }
 function cellText(tab,c,r){ const v=r[c[0]]; if(v==null||v==='') return ''; if(c[2]==='dt') return fmtDt(v); return fmtCell(tab.key,c[0],v).replace(/<[^>]*>/g,'').trim(); }
-function logTable(tab,rows){
+function logTable(tab,rows,total,capped){
+  const ps=state.lps, pages=Math.max(1,Math.ceil(total/ps)), p=Math.min(state.lpage,pages);
   const head=tab.cols.map(c=>`<th>${esc(c[1])}</th>`).join('');
   const body=rows.map(r=>`<tr>${tab.cols.map(c=>`<td>${cellHtml(tab,c,r)}</td>`).join('')}</tr>`).join('');
-  return `<div id="logbody"><div class="muted" style="margin:2px 0 10px">총 ${rows.length}건${rows.length>=1000?' (최대 1000건 표시)':''}</div>
+  // 페이지 번호는 현재 주변 5개 + 처음·끝. 수백 페이지를 다 늘어놓지 않는다.
+  const nums=[]; const lo=Math.max(1,p-2), hi=Math.min(pages,p+2);
+  if(lo>1){ nums.push(1); if(lo>2) nums.push('…'); }
+  for(let i=lo;i<=hi;i++) nums.push(i);
+  if(hi<pages){ if(hi<pages-1) nums.push('…'); nums.push(pages); }
+  const numHtml=nums.map(n=>n==='…'?'<span class="muted">…</span>':`<button class="pgn ${n===p?'on':''}" data-p="${n}">${n}</button>`).join('');
+  return `<div id="logbody">
     <div class="tcard tscroll"><table><thead><tr>${head}</tr></thead>
-    <tbody>${body||`<tr><td colspan="${tab.cols.length}" class="muted" style="text-align:center;padding:28px">기록이 없습니다.</td></tr>`}</tbody></table></div></div>`;
+    <tbody>${body||`<tr><td colspan="${tab.cols.length}" class="muted" style="text-align:center;padding:28px">기록이 없습니다.</td></tr>`}</tbody></table></div>
+    <div class="pager">
+      <span class="muted">${total===0?0:(p-1)*ps+1}–${Math.min(p*ps,total)} / 총 ${total.toLocaleString()}건${capped?' <span class="badge b-a">최근 1000건 안에서</span>':''}</span>
+      <div class="pg">
+        <select id="lps">${[50,100,200].map(n=>`<option value="${n}" ${ps===n?'selected':''}>${n}건씩</option>`).join('')}</select>
+        <button class="btn sm line" id="lprev" ${p<=1?'disabled':''}>‹ 이전</button>
+        <span class="pgnums">${numHtml}</span>
+        <button class="btn sm line" id="lnext" ${p>=pages?'disabled':''}>다음 ›</button>
+      </div></div></div>`;
 }
-function exportCsv(tab,rows,l){
-  const head=tab.cols.map(c=>c[1]).join(',');
-  const body=rows.map(r=>tab.cols.map(c=>'"'+cellText(tab,c,r).replace(/"/g,'""')+'"').join(',')).join('\n');
-  download(`${l.code}_${tab.key}.csv`, '﻿'+head+'\n'+body);
+async function exportCsvAll(tab,l){
+  const btn=document.getElementById('csv'); if(btn){ btn.disabled=true; btn.textContent='내려받는 중…'; }
+  try{
+    const rows=await fetchAllRows(tab);
+    const head=tab.cols.map(c=>c[1]).join(',');
+    const body=rows.map(r=>tab.cols.map(c=>'"'+cellText(tab,c,r).replace(/"/g,'""')+'"').join(',')).join('\n');
+    download(`${l.code}_${tab.key}.csv`, '﻿'+head+'\n'+body);
+  }catch(e){ alert('CSV 내보내기 실패: '+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='CSV 내보내기'; } }
+}
+
+// ── 환경 탭: 지표 타일 + 그래프 ──────────────────────────────
+// 기준값(참고). 공중화장실 전용 기준이 없어 실내공기질 유지·권고 기준과 쾌적 범위를 썼다. 지자체가 다른
+// 값을 쓰면 여기만 고친다. band = 허용 범위(그래프의 연한 띠), bad = 그 밖에서도 '나쁨' 으로 격상하는 값.
+const ENV_METRICS=[
+  { key:'temperature', s:'temp', label:'온도',   unit:'°C',    band:[18,28],  digits:1 },
+  { key:'humidity',    s:'hum',  label:'습도',   unit:'%',     band:[40,70],  digits:1 },
+  { key:'ammonia_ppm', s:'nh3',  label:'암모니아', unit:'ppm', band:[0,1],  bad:5,  digits:3 },
+  { key:'pm25',        s:'pm',   label:'PM2.5',  unit:'µg/m³', band:[0,35], bad:75, digits:1 },
+];
+function envGrade(m,v){ if(v==null) return null; if(m.bad!=null && v>=m.bad) return 'bad'; if(v<m.band[0]||v>m.band[1]) return 'warn'; return 'ok'; }
+async function renderEnvViz(l){
+  const box=document.getElementById('envviz'); if(!box) return;
+  const {a,b}=logBounds(); const from=a||new Date(Date.now()-3*86400000), to=b||new Date();
+  // 구간(분): 기간이 얼마든 300점 안팎. 5분 단위로 올림.
+  const spanMin=(to-from)/60000; const bucket=Math.max(5, Math.ceil(spanMin/300/5)*5);
+  box.innerHTML='<div class="muted" style="padding:10px 2px">그래프 불러오는 중…</div>';
+  let series=[], latest=null;
+  try{
+    [series,latest]=await Promise.all([
+      rpc('env_series',{p_location:l.id,p_from:from.toISOString(),p_to:to.toISOString(),p_bucket_min:bucket}),
+      supabase.from('env_latest').select('*').eq('location_id',l.id).maybeSingle().then(r=>r.data) ]);
+  }catch(e){ box.innerHTML=`<div class="err">그래프 조회 실패: ${esc(e.message)}${/env_series/.test(e.message)?' — env_series 마이그레이션이 아직 적용되지 않았습니다':''}</div>`; return; }
+  series=series||[];
+  const tiles=ENV_METRICS.map(m=>{
+    const cur=latest?latest[m.key]:null;
+    const vals=series.map(r=>+r[m.s+'_avg']).filter(v=>!isNaN(v));
+    const mn=series.length?Math.min(...series.map(r=>+r[m.s+'_min'])):null, mx=series.length?Math.max(...series.map(r=>+r[m.s+'_max'])):null;
+    const av=vals.length?vals.reduce((x,y)=>x+y,0)/vals.length:null;
+    const g=envGrade(m,cur); const gb={ok:['b-g','양호'],warn:['b-a','주의'],bad:['b-r','나쁨']}[g];
+    const f=v=>v==null?'-':(+v).toFixed(m.digits);
+    return `<div class="etile ${g||''}"><div class="l">${m.label} <span class="muted">${m.unit}</span></div>
+      <div class="v">${f(cur)} ${gb?`<span class="badge ${gb[0]}">${gb[1]}</span>`:''}</div>
+      <div class="s">최소 <b>${f(mn)}</b> · 평균 <b>${f(av)}</b> · 최대 <b>${f(mx)}</b></div></div>`;
+  }).join('');
+  const charts=ENV_METRICS.map(m=>envChart(m,series,from,to)).join('');
+  box.innerHTML=`<div class="etiles">${tiles}</div>
+    <div class="envgrid">${charts}</div>
+    <div class="muted" style="font-size:12px;margin:6px 2px 14px">${bucket}분 구간 평균선 · 옅은 띠는 그 구간의 최소~최대 · 초록 띠는 허용 범위 · 회색은 밤(22~06시)${latest?` · 현재값 ${esc(fmtDt(latest.recorded_at))} 측정`:''}</div>`;
+  wireEnvHover(box, series, from, to);
+}
+// 지표 하나의 라인 차트(인라인 SVG, 라이브러리 없음 — 폐쇄망에서도 그대로). viewBox 로 그리고 CSS 로 늘린다.
+const EW=600, EH=190, EP={l:44,r:12,t:12,b:24};
+function envScale(m,series){
+  const los=series.map(q=>+q[m.s+'_min']).filter(v=>!isNaN(v)), his=series.map(q=>+q[m.s+'_max']).filter(v=>!isNaN(v));
+  let vmin=Math.min(m.band[0],...los), vmax=Math.max(m.band[1],...his);
+  if(!isFinite(vmin)||!isFinite(vmax)){ vmin=m.band[0]; vmax=m.band[1]; }
+  const pad=(vmax-vmin)*0.08||1; vmin-=pad; vmax+=pad; if(m.band[0]===0 && vmin<0) vmin=0;
+  return {vmin,vmax};
+}
+function envChart(m,series,from,to){
+  const W=EW,H=EH,P=EP, x0=P.l, x1=W-P.r, y0=P.t, y1=H-P.b;
+  const t0=+from, t1=+to; const xs=t=>x0+(x1-x0)*((t-t0)/(t1-t0));
+  const pts=series.map(r=>({t:+new Date(r.bucket), a:+r[m.s+'_avg'], lo:+r[m.s+'_min'], hi:+r[m.s+'_max']})).filter(p=>!isNaN(p.a));
+  const {vmin,vmax}=envScale(m,series);
+  const ys=v=>y1-(y1-y0)*((v-vmin)/(vmax-vmin));
+  // 밤 음영: 22~06시. 기간이 길면(>10일) 띠가 촘촘해져 오히려 방해라 뺀다.
+  let night=''; if((t1-t0)/86400000<=10){
+    const d=new Date(t0); d.setHours(22,0,0,0); if(+d>t0) d.setDate(d.getDate()-1);
+    for(let s=+d; s<t1; s+=86400000){ const e=s+8*3600000; const xa=Math.max(x0,xs(s)), xb=Math.min(x1,xs(e)); if(xb>xa) night+=`<rect x="${xa.toFixed(1)}" y="${y0}" width="${(xb-xa).toFixed(1)}" height="${y1-y0}" fill="rgba(20,30,55,.045)"/>`; }
+  }
+  const bTop=ys(Math.min(m.band[1],vmax)), bBot=ys(Math.max(m.band[0],vmin));
+  const band=`<rect x="${x0}" y="${bTop.toFixed(1)}" width="${x1-x0}" height="${Math.max(0,bBot-bTop).toFixed(1)}" fill="rgba(12,163,12,.08)"/>`;
+  // y 눈금 4개 안팎, 깔끔한 수로.
+  const ticks=[]; const step=niceStep((vmax-vmin)/3); for(let v=Math.ceil(vmin/step)*step; v<=vmax+1e-9; v+=step) ticks.push(+v.toFixed(6));
+  const grid=ticks.map(v=>`<line x1="${x0}" x2="${x1}" y1="${ys(v).toFixed(1)}" y2="${ys(v).toFixed(1)}" stroke="#E8ECF4" stroke-width="1"/><text x="${x0-6}" y="${(ys(v)+4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#6B7590">${fmtTick(v,m)}</text>`).join('');
+  // x 눈금: 기간에 따라 시각/날짜.
+  const xt=xTicks(t0,t1).map(([t,lab])=>`<line x1="${xs(t).toFixed(1)}" x2="${xs(t).toFixed(1)}" y1="${y1}" y2="${y1+4}" stroke="#C9D0DE"/><text x="${xs(t).toFixed(1)}" y="${y1+16}" text-anchor="middle" font-size="10.5" fill="#6B7590">${lab}</text>`).join('');
+  const area=pts.length?`<path d="M${pts.map(p=>`${xs(p.t).toFixed(1)},${ys(p.hi).toFixed(1)}`).join('L')}L${pts.slice().reverse().map(p=>`${xs(p.t).toFixed(1)},${ys(p.lo).toFixed(1)}`).join('L')}Z" fill="rgba(42,120,214,.12)"/>`:'';
+  const line=pts.length?`<path d="M${pts.map(p=>`${xs(p.t).toFixed(1)},${ys(p.a).toFixed(1)}`).join('L')}" fill="none" stroke="#2A78D6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`:'';
+  const empty=pts.length?'':`<text x="${(x0+x1)/2}" y="${(y0+y1)/2}" text-anchor="middle" font-size="12" fill="#6B7590">이 기간에 측정값이 없습니다</text>`;
+  return `<div class="ecard" data-m="${m.key}"><div class="eh"><b>${m.label}</b> <span class="muted">${m.unit}</span><span class="ev muted"></span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="esvg">
+      ${night}${band}${grid}<line x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}" stroke="#C9D0DE"/>${xt}${area}${line}${empty}
+      <g class="hov" style="display:none"><line class="hx" y1="${y0}" y2="${y1}" stroke="#36405A" stroke-width="1" vector-effect="non-scaling-stroke"/><circle class="hd" r="4.5" fill="#2A78D6" stroke="#fff" stroke-width="2"/></g>
+    </svg></div>`;
+}
+function niceStep(raw){ const p=Math.pow(10,Math.floor(Math.log10(raw||1))); const r=raw/p; return (r<=1?1:r<=2?2:r<=5?5:10)*p; }
+function fmtTick(v,m){ return m.digits>=3?v.toFixed(2):(Number.isInteger(v)?String(v):v.toFixed(1)); }
+function xTicks(t0,t1){
+  const span=t1-t0, out=[]; const pad=x=>String(x).padStart(2,'0');
+  if(span<=36*3600000){ const d=new Date(t0); d.setMinutes(0,0,0); const stepH=span<=12*3600000?2:6;
+    for(let t=+d; t<=t1; t+=stepH*3600000){ if(t>=t0){ const n=new Date(t); out.push([t, n.getHours()===0?`${pad(n.getMonth()+1)}/${pad(n.getDate())}`:`${pad(n.getHours())}시`]); } } }
+  else { const d=new Date(t0); d.setHours(0,0,0,0); const days=span/86400000; const stepD=days<=8?1:days<=16?2:days<=45?5:10;
+    for(let t=+d; t<=t1; t+=stepD*86400000){ if(t>=t0){ const n=new Date(t); out.push([t,`${pad(n.getMonth()+1)}/${pad(n.getDate())}`]); } } }
+  return out;
+}
+// 네 그래프가 한 시각을 같이 가리킨다 — 마우스가 어느 그래프 위에 있든 나머지도 같은 구간에 십자선.
+function wireEnvHover(box, series, from, to){
+  const pts=series.map(r=>({t:+new Date(r.bucket), r})); if(!pts.length) return;
+  const t0=+from,t1=+to; const cards=[...box.querySelectorAll('.ecard')];
+  const scales={}; ENV_METRICS.forEach(m=>{ scales[m.key]=envScale(m,series); });
+  let tip=box.querySelector('.etip'); if(!tip){ tip=document.createElement('div'); tip.className='etip'; tip.style.display='none'; box.appendChild(tip); }
+  const show=(idx,ev)=>{
+    const {t,r}=pts[idx];
+    cards.forEach(c=>{ const m=ENV_METRICS.find(x=>x.key===c.dataset.m); const svg=c.querySelector('svg'); const g=svg.querySelector('.hov');
+      const a=+r[m.s+'_avg']; if(isNaN(a)){ g.style.display='none'; return; }
+      const x=EP.l+(EW-EP.l-EP.r)*((t-t0)/(t1-t0));
+      const {vmin,vmax}=scales[m.key];
+      const y=(EH-EP.b)-((EH-EP.b-EP.t)*((a-vmin)/(vmax-vmin)));
+      g.style.display=''; g.querySelector('.hx').setAttribute('x1',x); g.querySelector('.hx').setAttribute('x2',x);
+      g.querySelector('.hd').setAttribute('cx',x); g.querySelector('.hd').setAttribute('cy',y);
+      c.querySelector('.ev').textContent=`${a.toFixed(m.digits)} ${m.unit} (${(+r[m.s+'_min']).toFixed(m.digits)}~${(+r[m.s+'_max']).toFixed(m.digits)})`;
+    });
+    tip.textContent=`${fmtDt(new Date(t).toISOString())} · 측정 ${r.n}회`; tip.style.display='';
+    const rb=box.getBoundingClientRect(); tip.style.left=Math.min(rb.width-160, ev.clientX-rb.left+12)+'px'; tip.style.top=(ev.clientY-rb.top-30)+'px';
+  };
+  const hide=()=>{ cards.forEach(c=>{ c.querySelector('.hov').style.display='none'; c.querySelector('.ev').textContent=''; }); tip.style.display='none'; };
+  cards.forEach(c=>{ const svg=c.querySelector('svg');
+    svg.addEventListener('pointermove',ev=>{ const rc=svg.getBoundingClientRect(); const fx=(ev.clientX-rc.left)/rc.width*EW;
+      const t=t0+(t1-t0)*((fx-EP.l)/(EW-EP.l-EP.r)); let best=0,bd=Infinity; pts.forEach((p,i)=>{ const d=Math.abs(p.t-t); if(d<bd){bd=d;best=i;} }); show(best,ev); });
+    svg.addEventListener('pointerleave',hide); });
 }
 function overviewHtml(l,admin){
   const st=STATUS[l.status]||{l:l.status};
