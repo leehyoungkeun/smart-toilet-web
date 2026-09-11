@@ -73,6 +73,11 @@
   .kv > div { padding:8px 0; border-bottom:1px solid #F1F4FA; }
   .kv > div:nth-last-child(-n+2) { border-bottom:0; }
   .kv .k { color:#48526A; }
+  /* 기본 정보를 묶음별로. 넓은 화면은 두 단, 좁으면 한 단. 묶음 제목은 작게 — 값을 가리면 안 된다. */
+  .kvgroups { display:grid; grid-template-columns:1fr 1fr; gap:6px 40px; margin-top:6px; }
+  .kvg h4 { margin:16px 0 0; padding-bottom:6px; border-bottom:2px solid #E3E8F4; font-size:12.5px; font-weight:700; color:#4353E0; letter-spacing:.02em; }
+  .kvg .kv { margin-top:4px; }
+  @media (max-width:900px){ .kvgroups { grid-template-columns:1fr; } }
   .cardhead { display:flex; align-items:center; gap:10px; margin-bottom:2px; }
   .cardhead b { font-size:15px; color:#22314F; }
   .cardhead .hint { margin-left:auto; font-size:12px; color:#5A6580; }
@@ -158,7 +163,7 @@ function netRow(l){
   return `${mode}${ssid}${sync}`;
 }
 function deviceStateRows(l){
-  const s=l.device_state; if(!s) return '';
+  const s=l.device_state; if(!s) return {device:'',board:''};
   const ago=iso=>{ if(!iso) return null; const m=Math.round((Date.now()-new Date(iso))/60000); return m<1?'방금':m<60?`${m}분 전`:m<1440?`${Math.round(m/60)}시간 전`:`${Math.round(m/1440)}일 전`; };
   const boardAgo=ago(s.board_seen_at);
   const board=s.board_connected?`<span class="badge b-g">연결</span> ${boardAgo?`응답 ${boardAgo}`:''}`:`<span class="badge b-r">미연결</span>${boardAgo?` <span class="muted">마지막 ${boardAgo}</span>`:''}`;
@@ -184,9 +189,12 @@ function deviceStateRows(l){
     const st=d.storage_free_mb!=null?`${(d.storage_free_mb/1024).toFixed(1)}GB 남음 / ${(d.storage_total_mb/1024).toFixed(0)}GB${d.storage_free_mb<500?' <span class="badge b-r">부족</span>':''}`:'-';
     const temp=d.battery_temp_c!=null?`${d.battery_temp_c}°C${d.battery_temp_c>=45?' <span class="badge b-r">과열</span>':''}`:'-';
     const up=d.uptime_sec!=null?(d.uptime_sec<3600?`${Math.round(d.uptime_sec/60)}분`:d.uptime_sec<86400?`${(d.uptime_sec/3600).toFixed(1)}시간`:`${(d.uptime_sec/86400).toFixed(1)}일`):'-';
-    extra=row('통신',net)+row('시계',clock)+row('저장공간',st)+row('온도',temp)+row('가동 시간',`${up}${d.boot_reason?` <span class="muted">(부팅: ${esc(d.boot_reason)})</span>`:''}`);
+    extra=row('가동 시간',`${up}${d.boot_reason?` <span class="muted">(부팅: ${esc(d.boot_reason)})</span>`:''}`)+row('통신',net)+row('시계',clock)+row('전원',s.power?power:'-')+row('저장공간',st)+row('온도',temp);
   }
-  return row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>')+row('전원',s.power?power:'-')+row('신원 복구',reclaim)+extra;
+  // 두 묶음으로 돌려준다 — 태블릿 자체의 상태와, 태블릿에 붙은 보드(센서·배출)의 상태는 보는
+  // 사람이 다르다(전자는 통신·기기 담당, 후자는 현장 정비). 한 줄로 늘어놓으면 25행이라 못 읽는다.
+  return { device:(d?extra:row('전원',s.power?power:'-'))+row('신원 복구',reclaim),
+           board:row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>') };
 }
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
   const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
@@ -568,20 +576,36 @@ function overviewHtml(l,admin){
     ${card('safety', l.online?GREEN:AMBER, l.online?'온라인':'오프라인','접속')}</div>
     <div class="card pad">
     <div class="cardhead"><span style="color:#4353E0;display:flex">${svgIcon('overview')}</span><b>기본 정보</b></div>
-    <div class="kv">
-      ${row('코드',`<code>${esc(l.code)}</code>`)}
-      ${row('소속',esc(l.org_name||'-'))}
-      ${row('지역',esc([l.sido,l.sigungu].filter(Boolean).join(' ')||'-'))}
-      ${row('주소',esc(l.address||'-'))}
-      ${row('상태',esc(st.l))}
-      ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
-      ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
-      ${row('통신 환경',netRow(l))}
-      ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
-      ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
-      ${deviceStateRows(l)}
-      ${row('등록일',fmtDate(l.created_at))}
-    </div>
+    <!-- 한 줄 25행을 세 묶음으로 나눈다(2026-09-11). 보는 사람이 다르다: 위치·운영은 지자체 담당,
+         태블릿·통신은 기기 관리, 센서·배출은 현장 정비. 넓은 화면에선 두 단으로 놓인다. -->
+    ${(()=>{ const ds=deviceStateRows(l); return `<div class="kvgroups">
+    <section class="kvg">
+      <h4>위치 · 운영</h4>
+      <div class="kv">
+        ${row('코드',`<code>${esc(l.code)}</code>`)}
+        ${row('소속',esc(l.org_name||'-'))}
+        ${row('지역',esc([l.sido,l.sigungu].filter(Boolean).join(' ')||'-'))}
+        ${row('주소',esc(l.address||'-'))}
+        ${row('상태',esc(st.l))}
+        ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
+        ${row('등록일',fmtDate(l.created_at))}
+      </div>
+    </section>
+    <section class="kvg">
+      <h4>태블릿 · 통신</h4>
+      <div class="kv">
+        ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
+        ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
+        ${row('최근 접속',l.last_seen_at?fmtDt(l.last_seen_at):'-')}
+        ${row('통신 환경',netRow(l))}
+        ${ds.device}
+      </div>
+    </section>
+    ${ds.board?`<section class="kvg">
+      <h4>센서 · 배출</h4>
+      <div class="kv">${ds.board}</div>
+    </section>`:''}
+    </div>`; })()}
     <!-- 설정은 따로 조회한다. 목록 RPC 에 다 실으면 화장실 수백 개를 부를
          때마다 쓰지도 않는 jsonb 를 함께 끌고 온다. -->
     <div id="ovset"><div class="muted" style="margin-top:14px">상세 정보 불러오는 중…</div></div>
