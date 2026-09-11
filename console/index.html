@@ -73,11 +73,12 @@
   .kv > div { padding:8px 0; border-bottom:1px solid #F1F4FA; }
   .kv > div:nth-last-child(-n+2) { border-bottom:0; }
   .kv .k { color:#48526A; }
-  /* 기본 정보를 묶음별로. 넓은 화면은 두 단, 좁으면 한 단. 묶음 제목은 작게 — 값을 가리면 안 된다. */
-  .kvgroups { display:grid; grid-template-columns:1fr 1fr; gap:6px 40px; margin-top:6px; }
-  .kvg h4 { margin:16px 0 0; padding-bottom:6px; border-bottom:2px solid #E3E8F4; font-size:12.5px; font-weight:700; color:#4353E0; letter-spacing:.02em; }
-  .kvg .kv { margin-top:4px; }
-  @media (max-width:900px){ .kvgroups { grid-template-columns:1fr; } }
+  /* 개요 카드 격자: 위 줄 = 기본 정보 · 이용 안내/설치 구성, 아래 줄 = 태블릿·통신 · 센서·배출.
+     카드 높이는 줄 안에서 맞춘다(align-items:stretch 기본). 좁으면 한 단. */
+  .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .ovgrid > .card, .ovgrid > #ovset > .card { height:100%; box-sizing:border-box; }
+  .ovgrid .kv { grid-template-columns:118px 1fr; }
+  @media (max-width:900px){ .ovgrid { grid-template-columns:1fr; } }
   .cardhead { display:flex; align-items:center; gap:10px; margin-bottom:2px; }
   .cardhead b { font-size:15px; color:#22314F; }
   .cardhead .hint { margin-left:auto; font-size:12px; color:#5A6580; }
@@ -574,13 +575,13 @@ function overviewHtml(l,admin){
            l.pad_qty==null?'-':l.pad_qty+' / '+l.pad_cap,'생리용품 재고')}
     ${card('complaints', l.open_complaints>0?RED:GREY, (l.open_complaints||0)+'건','미처리 민원')}
     ${card('safety', l.online?GREEN:AMBER, l.online?'온라인':'오프라인','접속')}</div>
+    <!-- 카드 넉 장을 두 단 격자로(2026-09-11). 위 줄은 "이 화장실이 무엇인가"(기본 정보 + 키오스크에
+         나가는 이용 안내·설치 구성), 아래 줄은 "기기가 어떤가"(태블릿·통신 + 센서·배출). 예전엔 25행
+         한 줄 + 그 아래 이용 안내였다 — 스크롤해야 보이는 것이 정작 현장 사람이 먼저 보는 값이었다. -->
+    ${(()=>{ const ds=deviceStateRows(l); const head=(icon,t)=>`<div class="cardhead"><span style="color:#4353E0;display:flex">${svgIcon(icon)}</span><b>${t}</b></div>`;
+    return `<div class="ovgrid">
     <div class="card pad">
-    <div class="cardhead"><span style="color:#4353E0;display:flex">${svgIcon('overview')}</span><b>기본 정보</b></div>
-    <!-- 한 줄 25행을 세 묶음으로 나눈다(2026-09-11). 보는 사람이 다르다: 위치·운영은 지자체 담당,
-         태블릿·통신은 기기 관리, 센서·배출은 현장 정비. 넓은 화면에선 두 단으로 놓인다. -->
-    ${(()=>{ const ds=deviceStateRows(l); return `<div class="kvgroups">
-    <section class="kvg">
-      <h4>위치 · 운영</h4>
+      ${head('overview','기본 정보')}
       <div class="kv">
         ${row('코드',`<code>${esc(l.code)}</code>`)}
         ${row('소속',esc(l.org_name||'-'))}
@@ -590,9 +591,12 @@ function overviewHtml(l,admin){
         ${row('유지보수',l.maintenance_until?`${esc(l.maintenance_until)} · ${maintInfo(l).txt}`:'미설정')}
         ${row('등록일',fmtDate(l.created_at))}
       </div>
-    </section>
-    <section class="kvg">
-      <h4>태블릿 · 통신</h4>
+    </div>
+    <!-- 설정은 따로 조회한다. 목록 RPC 에 다 실으면 화장실 수백 개를 부를
+         때마다 쓰지도 않는 jsonb 를 함께 끌고 온다. settingsHtml 이 카드째 채운다. -->
+    <div id="ovset"><div class="card pad">${head('inspections','이용 안내 · 설치 구성')}<div class="muted" style="margin-top:14px">불러오는 중…</div></div></div>
+    <div class="card pad">
+      ${head('safety','태블릿 · 통신')}
       <div class="kv">
         ${row('장비코드(고유)',l.device_code?`<code>${esc(l.device_code)}</code>${l.paired?'':' <span class="muted">· 미등록</span>'}`:'-')}
         ${row('MDM 기기번호',l.mdm_number?`<code>${esc(l.mdm_number)}</code>`:'<span class="muted">미지정</span>')}
@@ -600,21 +604,17 @@ function overviewHtml(l,admin){
         ${row('통신 환경',netRow(l))}
         ${ds.device}
       </div>
-    </section>
-    ${ds.board?`<section class="kvg">
-      <h4>센서 · 배출</h4>
+    </div>
+    ${ds.board?`<div class="card pad">
+      ${head('dispense','센서 · 배출')}
       <div class="kv">${ds.board}</div>
-    </section>`:''}
+    </div>`:''}
     </div>`; })()}
-    <!-- 설정은 따로 조회한다. 목록 RPC 에 다 실으면 화장실 수백 개를 부를
-         때마다 쓰지도 않는 jsonb 를 함께 끌고 온다. -->
-    <div id="ovset"><div class="muted" style="margin-top:14px">상세 정보 불러오는 중…</div></div>
-    ${admin?`<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+    ${admin?`<div class="card pad" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;padding:14px 22px">
       ${l.deleted?`<button class="btn" data-restore>복원</button>`:`<button class="btn" data-edit>수정</button><button class="btn line" style="color:#B5730A;border-color:#F0D9AF" data-soft>삭제(보관)</button>`}
       <button class="btn line" style="color:#D25151;border-color:#F3C2C2" data-hard>완전 삭제</button>
       ${!l.deleted&&l.paired?'<button class="btn line" data-unpair>재페어링 초기화</button>':''}
-      ${!l.deleted?'<button class="btn line" data-reissue>코드 재발급</button>':''}</div>`:''}
-    </div>`;
+      ${!l.deleted?'<button class="btn line" data-reissue>코드 재발급</button>':''}</div>`:''}`;
 }
 // 개요에 설치 구성과 이용 안내를 함께 보여준다. 이 값들이 그대로 키오스크
 // 화면에 나가므로, 콘솔에서 확인할 수 없으면 현장에 가서야 잘못을 안다.
@@ -630,7 +630,7 @@ function settingsHtml(l,d){
     .filter(Boolean).join(' · ') || '-';
   const am=(i.amenities||[]).map(k=>(AMENITIES.find(a=>a[0]===k)||[,k])[1]).join(' · ')||'-';
   const ok=infoOk({agency:i.agency,phone:i.phone,hours:h},l.address);
-  return `<div class="card pad" style="margin-top:16px">
+  return `<div class="card pad">
     <div class="cardhead">
       <span style="color:#4353E0;display:flex">${svgIcon('inspections')}</span>
       <b>이용 안내 · 설치 구성</b>
@@ -661,7 +661,7 @@ function wireOverview(l){
     .then(({data})=>{ const box=document.getElementById('ovset');
       if(box) box.innerHTML=settingsHtml(l,data); })
     .catch(()=>{ const box=document.getElementById('ovset');
-      if(box) box.innerHTML='<div class="muted" style="margin-top:14px">상세 정보를 불러오지 못했습니다.</div>'; });
+      if(box) box.innerHTML='<div class="card pad"><div class="cardhead"><b>이용 안내 · 설치 구성</b></div><div class="muted" style="margin-top:14px">상세 정보를 불러오지 못했습니다.</div></div>'; });
   const act=async(fn,body,after)=>{ try{ await rpc(fn,body); renderDashboard(); }catch(e){ alert((after||'실패')+': '+e.message); } };
   const edit=q('[data-edit]'); if(edit) edit.onclick=()=>openEdit(l);
   const soft=q('[data-soft]'); if(soft) soft.onclick=()=>{ if(confirm(`'${l.name}'을(를) 삭제(보관) 처리할까요?`)) act('admin_soft_delete_location',{p_id:l.id},'삭제 실패'); };
