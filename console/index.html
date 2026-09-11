@@ -68,6 +68,16 @@
   /* 모달 */
   .backdrop { position:fixed; inset:0; background:rgba(20,30,55,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
   .modal { background:#fff; border-radius:16px; width:520px; max-width:92%; max-height:88vh; overflow:auto; padding:24px; }
+  /* 긴 폼(화장실 수정)은 넓게. 520px 한 단에 40여 칸을 세로로 쌓으면 스크롤만 길고 무엇이 어디 있는지 안 보인다.
+     넓은 모달에선 2열 격자를 3열로, 저장·취소는 아래에 붙박이. 좁은 화면은 다시 2열·1열. */
+  .modal.wide { width:1000px; max-width:96vw; max-height:92vh; padding:26px 30px 0; }
+  .modal.wide .grid2 { grid-template-columns:repeat(3,1fr); gap:12px 18px; }
+  .modal.wide .fsec { margin-top:22px; font-size:14.5px; }
+  .modal.wide .fsec:first-child { margin-top:0; }
+  .modal.wide .mfoot { position:sticky; bottom:0; background:#fff; padding:12px 0 18px; margin-top:16px; border-top:1px solid #E5E9F2; display:flex; gap:8px; align-items:center; }
+  .modal.wide .mfoot #e_msg { margin:0 0 0 auto; }
+  @media (max-width:900px){ .modal.wide .grid2 { grid-template-columns:1fr 1fr; } }
+  @media (max-width:600px){ .modal.wide .grid2 { grid-template-columns:1fr; } }
   .kv { display:grid; grid-template-columns:132px 1fr; gap:0 14px; font-size:14px; margin-top:12px; }
   /* 줄이 많아지면 눈이 짝을 잃는다. 옅은 구분선으로 행을 붙들어 준다. */
   .kv > div { padding:8px 0; border-bottom:1px solid #F1F4FA; }
@@ -398,7 +408,7 @@ function renderTable(){
   t.querySelectorAll('.lnk').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
 }
 
-function modalEl(html){ const bd=document.createElement('div'); bd.className='backdrop'; bd.innerHTML=`<div class="modal">${html}</div>`;
+function modalEl(html,cls=''){ const bd=document.createElement('div'); bd.className='backdrop'; bd.innerHTML=`<div class="modal ${cls}">${html}</div>`;
   bd.onclick=e=>{ if(e.target===bd) bd.remove(); }; document.body.appendChild(bd); return bd; }
 
 // ── 화장실 상세 (전체화면 · 개요 + 로그 탭 + CSV) ──
@@ -683,17 +693,18 @@ const FEATURE_KEYS=[['emergency_bell','안심 비상벨'],['cctv_link','외부 C
   ['complaint_feedback','민원 처리결과 회신']];
 function openEdit(l){
   const opt=(v,lab)=>`<option value="${v}" ${l.status===v?'selected':''}>${lab}</option>`;
-  const bd=modalEl(`<h2 style="margin:0 0 14px">화장실 수정 — ${esc(l.code)}</h2>
+  const bd=modalEl(`<h2 style="margin:0 0 6px">화장실 수정 <span class="muted" style="font-weight:400;font-size:15px">— ${esc(l.code)}</span></h2>
+    <div class="fsec">운영 정보</div>
     <div class="grid2">
       <div><label class="f">이름</label><input id="e_name" value="${esc(l.name)}"/></div>
       <div><label class="f">상태</label><select id="e_status">${opt('active','운영중')}${opt('maintenance','점검중')}${opt('inactive','중지')}</select></div>
+      <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
       ${regionPicker('e',l.sido,l.sigungu)}
       <div><label class="f">재고 (최대 ${l.pad_cap??30})</label><input id="e_stock" type="number" value="${l.pad_qty??0}"/></div>
-      <div><label class="f">유지보수 만료일</label><input id="e_maint" type="date" value="${l.maintenance_until||''}"/></div>
-      <div><label class="f">MDM 기기번호 <span class="muted" style="font-weight:400">· 물리 태블릿 매칭</span></label><input id="e_mdm" value="${esc(l.mdm_number||'')}" placeholder="예: TEST0006"/></div>
     </div>
-    <label class="f" style="margin-top:14px;display:block">통신 환경 <span class="muted" style="font-weight:400">· 기기가 망을 잃었을 때 스스로 되살리는 방식</span></label>
-    <div class="grid2" style="margin-top:6px">
+    <div class="fsec">기기 · 통신 <span class="muted" style="font-weight:400;font-size:12px">· 태블릿 매칭과, 기기가 망을 잃었을 때 스스로 되살리는 방식</span></div>
+    <div class="grid2">
+      <div><label class="f">MDM 기기번호 <span class="muted" style="font-weight:400">· 물리 태블릿 매칭</span></label><input id="e_mdm" value="${esc(l.mdm_number||'')}" placeholder="예: ST-XXXXX-XXXXX"/></div>
       <div><label class="f">회선</label><select id="e_net_mode">
         <option value="auto" ${(l.device_net_mode||'auto')==='auto'?'selected':''}>자동 (마지막 정상 회선으로 판단)</option>
         <option value="wifi" ${l.device_net_mode==='wifi'?'selected':''}>Wi-Fi 현장</option>
@@ -703,7 +714,7 @@ function openEdit(l){
       <div style="font-size:12px;color:#414C63;align-self:end">저장하면 2분 안에 기기에 반영됩니다. 저장 네트워크가 사라져도 이 값으로 다시 붙습니다. LTE 현장은 이름·비밀번호를 비워 두세요.</div>
     </div>
     <div id="e_info"><div class="muted" style="margin-top:14px">이용 안내 정보 불러오는 중…</div></div>
-    <label class="f" style="margin-top:14px;display:block">설치된 센서</label>
+    <div class="fsec">설치된 센서</div>
     <div id="e_sensors" style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
       ${SENSOR_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
         <input type="checkbox" data-sensor="${k}" style="width:auto"/> ${lab}</label>`).join('')}
@@ -711,7 +722,7 @@ function openEdit(l){
     <div style="font-size:12px;color:#414C63;margin-bottom:4px">
       끄면 키오스크 화면에서 그 항목이 사라집니다. 센서가 없는데 켜 두면 값 0 이 &ldquo;좋음&rdquo; 으로 표시됩니다.
     </div>
-    <label class="f" style="margin-top:14px;display:block">설치된 안전시설·기능</label>
+    <div class="fsec">설치된 안전시설·기능</div>
     <div style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
       ${FEATURE_KEYS.map(([k,lab])=>`<label style="display:flex;align-items:center;gap:6px;font-size:14px">
         <input type="checkbox" data-feature="${k}" style="width:auto"/> ${lab}</label>`).join('')}
@@ -720,8 +731,7 @@ function openEdit(l){
       안전시설이 하나라도 켜져야 키오스크 상단에 &ldquo;안심 모드 작동 중&rdquo; 이 표시됩니다.
       설치되지 않은 것을 켜 두면 시민이 위급 상황에서 없는 기능을 믿게 됩니다.
     </div>
-    <div id="e_msg" style="margin:10px 0"></div>
-    <div style="display:flex;gap:8px"><button class="btn" data-save>저장</button><button class="btn line" data-x>취소</button></div>`);
+    <div class="mfoot"><button class="btn" data-save>저장</button><button class="btn line" data-x>취소</button><div id="e_msg"></div></div>`,'wide');
   bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; });
   wireRegion(bd,'e');
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
