@@ -71,9 +71,13 @@
   /* 긴 폼(화장실 수정)은 넓게. 520px 한 단에 40여 칸을 세로로 쌓으면 스크롤만 길고 무엇이 어디 있는지 안 보인다.
      넓은 모달에선 2열 격자를 3열로, 저장·취소는 아래에 붙박이. 좁은 화면은 다시 2열·1열. */
   .modal.wide { width:1000px; max-width:96vw; max-height:92vh; padding:26px 30px 0; }
-  .modal.wide .grid2 { grid-template-columns:repeat(3,1fr); gap:12px 18px; }
-  .modal.wide .fsec { margin-top:22px; font-size:14.5px; }
-  .modal.wide .fsec:first-child { margin-top:0; }
+  .modal.wide .grid2 { grid-template-columns:repeat(3,1fr); gap:18px 24px; }
+  /* 구역 제목을 띠로 — 밑줄 한 줄로는 어디서 다음 구역이 시작하는지 안 보였다. 구역 사이는 넉넉히(34px),
+     칸 사이도 벌린다. 체크박스 묶음은 한 줄에 다닥다닥 붙지 않게 세로 간격을 준다. */
+  .modal.wide .fsec { margin:34px 0 14px; padding:9px 14px; font-size:14.5px; background:#EEF2FB; border:0; border-left:4px solid #4353E0; border-radius:8px; }
+  .modal.wide h2 + .fsec, .modal.wide .fsec:first-child { margin-top:12px; }
+  .modal.wide label.f { margin-bottom:6px; }
+  .modal.wide div[style*="flex-wrap:wrap"] { gap:12px 22px !important; padding:4px 2px; }
   .modal.wide .mfoot { position:sticky; bottom:0; background:#fff; padding:12px 0 18px; margin-top:16px; border-top:1px solid #E5E9F2; display:flex; gap:8px; align-items:center; }
   .modal.wide .mfoot #e_msg { margin:0 0 0 auto; }
   @media (max-width:900px){ .modal.wide .grid2 { grid-template-columns:1fr 1fr; } }
@@ -85,9 +89,11 @@
   .kv .k { color:#48526A; }
   /* 개요 카드 격자: 위 줄 = 기본 정보 · 이용 안내/설치 구성, 아래 줄 = 태블릿·통신 · 센서·배출.
      카드 높이는 줄 안에서 맞춘다(align-items:stretch 기본). 좁으면 한 단. */
-  .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .ovgrid > .card, .ovgrid > #ovset > .card { height:100%; box-sizing:border-box; }
-  .ovgrid .kv { grid-template-columns:118px 1fr; }
+  .ovgrid .kv { grid-template-columns:118px 1fr; margin-top:14px; }
+  .ovgrid .kv > div { padding:10px 0; }
+  .ovgrid .cardhead { padding-bottom:10px; border-bottom:2px solid #E8ECF5; }
   @media (max-width:900px){ .ovgrid { grid-template-columns:1fr; } }
   .cardhead { display:flex; align-items:center; gap:10px; margin-bottom:2px; }
   .cardhead b { font-size:15px; color:#22314F; }
