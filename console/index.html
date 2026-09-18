@@ -207,6 +207,11 @@ function deviceStateRows(l){
   const board=s.board_connected?`<span class="badge b-g">연결</span> ${boardAgo?`응답 ${boardAgo}`:''}`:`<span class="badge b-r">미연결</span>${boardAgo?` <span class="muted">마지막 ${boardAgo}</span>`:''}`;
   const disp=`성공 ${s.dispense_ok??0} · 실패 ${s.dispense_fail??0}${s.dispense_last_error?` <span class="muted">(최근 ${esc(s.dispense_last_error)})</span>`:''}`;
   const touchAgo=ago(s.last_touch_at);
+  // 2.1.28+: 보드가 왜 다시 켜졌는지 누계. WDT = 펌웨어가 멈춰 워치독이 스스로 살린 것 — 0이 정상, 늘면 "조용히 반복되는 고장".
+  // POR = 전원 인가, PIN = 리셋핀(프로그래밍), BOD/LVR = 저전압. 옛 앱은 board_resets 가 없다.
+  const rs=s.board_resets||null;
+  const boardReset=!rs?'<span class="muted">-</span>':(()=>{ const w=rs.WDT||0; const parts=Object.entries(rs).filter(([,n])=>n>0).map(([k,n])=>`${k} ${n}`);
+    return `${w>0?`<span class="badge b-y">워치독 복구 ${w}회</span>`:'<span class="badge b-g">워치독 0</span>'} <span class="muted">${parts.length?parts.join(' · '):'기록 없음'}${s.board_last_reset?` · 최근 ${esc(s.board_last_reset)} ${ago(s.board_last_reset_at)||''}`:''}</span>`; })();
   const p=s.power||{};
   // kPad(배터리 없음)는 DC 전원인데도 plugged=0·level=100(게이지 고정)을 보고한다 — 판단 불가로 표시.
   const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`
@@ -232,7 +237,7 @@ function deviceStateRows(l){
   // 두 묶음으로 돌려준다 — 태블릿 자체의 상태와, 태블릿에 붙은 보드(센서·배출)의 상태는 보는
   // 사람이 다르다(전자는 통신·기기 담당, 후자는 현장 정비). 한 줄로 늘어놓으면 25행이라 못 읽는다.
   return { device:(d?extra:row('전원',s.power?power:'-'))+row('신원 복구',reclaim),
-           board:row('센서·배출 보드',board)+row('배출 누계',disp)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>') };
+           board:row('센서·배출 보드',board)+row('배출 누계',disp)+row('보드 리셋',boardReset)+row('마지막 터치',touchAgo||'<span class="muted">없음</span>') };
 }
 function maintInfo(l){ if(!l.maintenance_until) return {txt:'미설정',cls:'',state:'none'};
   const t=new Date(); t.setHours(0,0,0,0); const due=new Date(l.maintenance_until+'T00:00:00');
