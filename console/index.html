@@ -24,6 +24,7 @@
   textarea { width:100%; min-height:160px; white-space:pre; }
   .err { color:#E0322F; font-size:14px; margin:6px 0; } .ok { color:#138A55; font-size:14px; margin:6px 0; }
   .muted { color:#4A5468; }
+.golink { font-size:12px; color:#4353E0; text-decoration:none; margin-left:4px; } .golink:hover { text-decoration:underline; }
   code { background:#EEF1FA; padding:2px 6px; border-radius:6px; font-size:13px; }
 
   /* 필터 카드 */
@@ -211,7 +212,7 @@ function deviceStateRows(l){
   // POR = 전원 인가, PIN = 리셋핀(프로그래밍), BOD/LVR = 저전압. 옛 앱은 board_resets 가 없다.
   const rs=s.board_resets||null;
   const boardReset=!rs?'<span class="muted">-</span>':(()=>{ const w=rs.WDT||0; const parts=Object.entries(rs).filter(([,n])=>n>0).map(([k,n])=>`${k} ${n}`);
-    return `${w>0?`<span class="badge b-y">워치독 복구 ${w}회</span>`:'<span class="badge b-g">워치독 0</span>'} <span class="muted">${parts.length?parts.join(' · '):'기록 없음'}${s.board_last_reset?` · 최근 ${esc(s.board_last_reset)} ${ago(s.board_last_reset_at)||''}`:''}</span>`; })();
+    return `${w>0?`<span class="badge b-y">워치독 복구 ${w}회</span>`:'<span class="badge b-g">워치독 0</span>'} <span class="muted">${parts.length?parts.join(' · '):'기록 없음'}${s.board_last_reset?` · 최근 ${esc(s.board_last_reset)} ${ago(s.board_last_reset_at)||''}`:''}</span> <a href="#" class="golink" data-tab="events">이력</a>`; })();
   const p=s.power||{};
   // kPad(배터리 없음)는 DC 전원인데도 plugged=0·level=100(게이지 고정)을 보고한다 — 판단 불가로 표시.
   const power=p.plugged?`<span class="badge b-g">전원 연결</span> ${p.level>=0?`배터리 ${p.level}%`:''}`
@@ -453,6 +454,7 @@ const ICON_PATH={
   complaints:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   inspections:'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9zM9 14l2 2 4-4',
   safety:'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  events:'M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3M6 6h12v12H6zM9 9h6v6H9z',
   satisfaction:'M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.8l-6.2 3.3L7 14.1 2 9.3l6.9-1z',
   env:'M14 14.8V3.5a2.5 2.5 0 0 0-5 0v11.3a4 4 0 1 0 5 0z',
 };
@@ -477,6 +479,9 @@ const LOG_TABS = [
     cols:[['created_at','시각','dt'],['rating','평점'],['comment','의견']] },
   { key:'env', label:'환경', table:'env_readings', ts:'recorded_at', env:true,
     cols:[['recorded_at','시각','dt'],['temperature','온도'],['humidity','습도'],['ammonia_ppm','암모니아'],['pm25','PM2.5']] },
+  // 기기 이벤트: 보드가 왜 다시 켜졌는지(board_reset) 를 한 건씩. 하트비트의 누계는 "몇 번" 이고, 여기는 "언제·얼마나 자주".
+  { key:'events', label:'기기 이벤트', table:'device_events', ts:'occurred_at',
+    cols:[['occurred_at','시각','dt'],['kind','종류'],['detail','상세']] },
 ];
 
 function openDetail(id){ state.detailId=id; state.tab='overview'; state.range=30; state.lfrom=state.lto=null; state.lpage=1; renderDetail(); }
@@ -507,6 +512,7 @@ function renderDetail(){
   document.getElementById('back').onclick=renderDashboard;
   const ls=document.getElementById('locset'); if(ls) ls.onclick=()=>renderSettings('location', l.id, l.name);
   body.querySelectorAll('.tab2').forEach(t=>t.onclick=()=>{ state.tab=t.dataset.t; renderDetail(); });
+  body.querySelectorAll('a.golink').forEach(a=>a.onclick=(e)=>{ e.preventDefault(); state.tab=a.dataset.tab; state.lpage=1; renderDetail(); });
   renderTab(l, admin);
 }
 
@@ -609,6 +615,9 @@ async function fetchAllRows(tab){
 }
 function badge(label,cls){ return `<span class="badge ${cls}">${esc(label)}</span>`; }
 const CAT_KO = { cleanliness:'청결', facility:'시설', safety:'안전', supplies:'비품' };
+// 기기 이벤트 종류와 보드 리셋 사유. WDT 만 노란 배지 — 펌웨어가 멈춰 스스로 살아난 것이라 잦으면 고장 신호.
+const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시작','b-b'] };
+const RESET_KO = { WDT:'워치독 복구', POR:'전원 인가', PIN:'리셋핀', BOD:'저전압(BOD)', LVR:'저전압(LVR)', SYS:'소프트 리셋', CPU:'CPU 리셋', UNKNOWN:'알 수 없음' };
 const SAFETY_KO = { emergency_bell:'비상벨', spycam_scan:'몰카탐지', cctv:'CCTV', abnormal_sound:'이상음' };
 function fmtCell(tabKey, field, v){
   if(v==null||v==='') return '<span class="muted">-</span>';
@@ -617,6 +626,10 @@ function fmtCell(tabKey, field, v){
     const m={completed:['완료','b-g'],done:['완료','b-g'],normal:['이상없음','b-g'],resolved:['해결','b-g'],confirmed:['확인','b-b']}[v]; return m?badge(m[0],m[1]):esc(v);
   }
   if(tabKey==='safety'&&field==='type') return badge(SAFETY_KO[v]||v,'b-b');
+  if(tabKey==='events'&&field==='kind'){ const m=EVENT_KO[v]; return m?badge(m[0],m[1]):badge(v,'b-b'); }
+  if(tabKey==='events'&&field==='detail'){ const d=typeof v==='object'?v:{}; if(d.reason){ const r=RESET_KO[d.reason]||d.reason;
+      return `${d.reason==='WDT'?badge('워치독 복구','b-y'):esc(r)}${d.fw?` <span class="muted">fw ${esc(d.fw)}</span>`:''}`; }
+    return esc(Object.entries(d).map(([k,x])=>`${k}=${x}`).join(', '))||'<span class="muted">-</span>'; }
   if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
   if(tabKey==='dispense'&&field==='method') return badge(String(v).toUpperCase(),'b-b');
   if(tabKey==='satisfaction'&&field==='rating'){ const n=+v; return `<span class="stars">${'★'.repeat(n)}<span class="star-off">${'★'.repeat(5-n)}</span></span> <span class="muted">${n}.0</span>`; }
