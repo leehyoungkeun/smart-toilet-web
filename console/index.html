@@ -206,7 +206,9 @@ function deviceStateRows(l){
   const ago=iso=>{ if(!iso) return null; const m=Math.round((Date.now()-new Date(iso))/60000); return m<1?'방금':m<60?`${m}분 전`:m<1440?`${Math.round(m/60)}시간 전`:`${Math.round(m/1440)}일 전`; };
   const boardAgo=ago(s.board_seen_at);
   const board=s.board_connected?`<span class="badge b-g">연결</span> ${boardAgo?`응답 ${boardAgo}`:''}`:`<span class="badge b-r">미연결</span>${boardAgo?` <span class="muted">마지막 ${boardAgo}</span>`:''}`;
-  const disp=`성공 ${s.dispense_ok??0} · 실패 ${s.dispense_fail??0}${s.dispense_last_error?` <span class="muted">(최근 ${esc(s.dispense_last_error)})</span>`:''}`;
+  // 2.1.28+: 배출기 고장 잠금 — 보드가 물림을 못 풀어 스스로 잠근 상태. 시민 화면은 "일시 중지" 가 뜨고 기사 출동이 필요하다.
+  const lockBadge=s.dispenser_locked?`<span class="badge b-r">배출기 잠김</span> <span class="muted">${esc(FAULT_KO[s.dispenser_locked_reason]||s.dispenser_locked_reason||'고장')}${s.dispenser_locked_at?` · ${ago(s.dispenser_locked_at)}`:''}</span> `:'';
+  const disp=`${lockBadge}성공 ${s.dispense_ok??0} · 실패 ${s.dispense_fail??0}${s.dispense_last_error?` <span class="muted">(최근 ${esc(FAULT_KO[s.dispense_last_error]||s.dispense_last_error)})</span>`:''}`;
   const touchAgo=ago(s.last_touch_at);
   // 2.1.28+: 보드가 왜 다시 켜졌는지 누계. WDT = 펌웨어가 멈춰 워치독이 스스로 살린 것 — 0이 정상, 늘면 "조용히 반복되는 고장".
   // POR = 전원 인가, PIN = 리셋핀(프로그래밍), BOD/LVR = 저전압. 옛 앱은 board_resets 가 없다.
@@ -616,7 +618,13 @@ async function fetchAllRows(tab){
 function badge(label,cls){ return `<span class="badge ${cls}">${esc(label)}</span>`; }
 const CAT_KO = { cleanliness:'청결', facility:'시설', safety:'안전', supplies:'비품' };
 // 기기 이벤트 종류와 보드 리셋 사유. WDT 만 노란 배지 — 펌웨어가 멈춰 스스로 살아난 것이라 잦으면 고장 신호.
-const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시작','b-b'] };
+const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시작','b-b'],
+  dispenser_locked:['배출기 잠금','b-r'], dispenser_unlocked:['잠금 해제','b-g'],
+  dispenser_unstick:['물림 자동해소','b-g'], dispenser_fault:['배출기 고장','b-a'], dispense_fail:['배출 실패','b-a'] };
+// 배출 고장 사유. stop_stuck = 리미트스위치가 눌린 채 안 떨어짐(캠 정지 위치·스위치 고장·배선 단락).
+const FAULT_KO = { stop_stuck:'스위치 물림', jam:'회전 안 됨(잼)', unstick_fail:'자동해소 실패', locked:'고장 잠금 상태',
+  timeout:'응답 없음', not_connected:'보드 미연결', send_failed:'전송 실패', busy:'동작 중', ctrl_unverified:'제어핀 미확정',
+  released:'스위치 풀림', cmd:'원격 해제', dispensed:'배출 성공', status:'상태 보고', unstick_ok:'자동해소 성공' };
 const RESET_KO = { WDT:'워치독 복구', POR:'전원 인가', PIN:'리셋핀', BOD:'저전압(BOD)', LVR:'저전압(LVR)', SYS:'소프트 리셋', CPU:'CPU 리셋', UNKNOWN:'알 수 없음' };
 const SAFETY_KO = { emergency_bell:'비상벨', spycam_scan:'몰카탐지', cctv:'CCTV', abnormal_sound:'이상음' };
 function fmtCell(tabKey, field, v){
@@ -627,8 +635,9 @@ function fmtCell(tabKey, field, v){
   }
   if(tabKey==='safety'&&field==='type') return badge(SAFETY_KO[v]||v,'b-b');
   if(tabKey==='events'&&field==='kind'){ const m=EVENT_KO[v]; return m?badge(m[0],m[1]):badge(v,'b-b'); }
-  if(tabKey==='events'&&field==='detail'){ const d=typeof v==='object'?v:{}; if(d.reason){ const r=RESET_KO[d.reason]||d.reason;
-      return `${d.reason==='WDT'?badge('워치독 복구','b-y'):esc(r)}${d.fw?` <span class="muted">fw ${esc(d.fw)}</span>`:''}`; }
+  if(tabKey==='events'&&field==='detail'){ const d=typeof v==='object'?v:{}; if(d.reason){ const r=RESET_KO[d.reason]||FAULT_KO[d.reason]||d.reason;
+      return `${d.reason==='WDT'?badge('워치독 복구','b-y'):esc(r)}${d.tries?` <span class="muted">${d.tries}회째</span>`:''}${d.fw?` <span class="muted">fw ${esc(d.fw)}</span>`:''}`; }
+    if(d.result) return esc(d.result==='ok'?'성공':d.result);
     return esc(Object.entries(d).map(([k,x])=>`${k}=${x}`).join(', '))||'<span class="muted">-</span>'; }
   if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
   if(tabKey==='dispense'&&field==='method') return badge(String(v).toUpperCase(),'b-b');
