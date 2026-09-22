@@ -621,7 +621,9 @@ const CAT_KO = { cleanliness:'청결', facility:'시설', safety:'안전', suppl
 const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시작','b-b'],
   dispenser_locked:['배출기 잠금','b-r'], dispenser_unlocked:['잠금 해제','b-g'],
   dispenser_unstick:['물림 자동해소','b-g'], dispenser_fault:['배출기 고장','b-a'], dispense_fail:['배출 실패','b-a'],
-  link_reset:['보드 통신 복구','b-a'] };
+  link_reset:['보드 통신 복구','b-a'],
+  // 2.1.30: 태블릿→보드 명령이 끊긴 때와 되살아난 때만 남는다(예전 link_reset 은 4분마다 쌓였다).
+  link_down:['보드 명령 불통','b-r'], link_up:['보드 명령 복구','b-g'] };
 // 배출 고장 사유. stop_stuck = 리미트스위치가 눌린 채 안 떨어짐(캠 정지 위치·스위치 고장·배선 단락).
 const FAULT_KO = { stop_stuck:'스위치 물림', jam:'회전 안 됨(잼)', unstick_fail:'자동해소 실패', locked:'고장 잠금 상태',
   timeout:'응답 없음', not_connected:'보드 미연결', send_failed:'전송 실패', busy:'동작 중', ctrl_unverified:'제어핀 미확정',
