@@ -4,6 +4,27 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>스마트 화장실 운영 콘솔</title>
+<!-- 오류 수집 → GlitchTip(sentry.greenlab.co.kr) 프로젝트 console-web. sentry.js 는 Sentry 브라우저 SDK 사본(ops/glitchtip/README.md). -->
+<script src="./sentry.js"></script>
+<script>
+(function () {
+  if (!window.Sentry) return;
+  var seen = {}, sent = 0;   // 페이지당 상한: 같은 오류 10분 1건, 세션당 20건
+  Sentry.init({
+    dsn: 'https://bcdd6d213f2a4481be8b326ad61ee9e1@sentry.greenlab.co.kr/2',
+    tracesSampleRate: 0, sendDefaultPii: false, maxBreadcrumbs: 30,
+    ignoreErrors: [/ResizeObserver loop/],
+    beforeSend: function (ev) {
+      var ex = (ev.exception && ev.exception.values || [])[0];
+      var k = ex ? (ex.type + ':' + String(ex.value || '').slice(0, 120)) : ('msg:' + String(ev.message || '').slice(0, 120));
+      var now = Date.now();
+      if (sent >= 20 || (seen[k] && now - seen[k] < 600000)) return null;
+      seen[k] = now; sent++; return ev;
+    }
+  });
+  Sentry.setTag('page', 'console');
+})();
+</script>
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; background:#EEF1F6; color:#1B2540; }

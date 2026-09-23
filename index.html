@@ -4,6 +4,27 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>무상 생리용품 수령</title>
+<!-- 오류 수집 → GlitchTip(sentry.greenlab.co.kr) 프로젝트 citizen-web. 시민은 오류를 알려 주지 않으므로 이게 유일한 창구. -->
+<script src="./sentry.js"></script>
+<script>
+(function () {
+  if (!window.Sentry) return;
+  var seen = {}, sent = 0;   // 페이지당 상한: 같은 오류 10분 1건, 세션당 20건
+  Sentry.init({
+    dsn: 'https://7e553b7cf70e47bcb48387e489dd19a1@sentry.greenlab.co.kr/3',
+    tracesSampleRate: 0, sendDefaultPii: false, maxBreadcrumbs: 30,
+    ignoreErrors: [/ResizeObserver loop/],
+    beforeSend: function (ev) {
+      var ex = (ev.exception && ev.exception.values || [])[0];
+      var k = ex ? (ex.type + ':' + String(ex.value || '').slice(0, 120)) : ('msg:' + String(ev.message || '').slice(0, 120));
+      var now = Date.now();
+      if (sent >= 20 || (seen[k] && now - seen[k] < 600000)) return null;
+      seen[k] = now; sent++; return ev;
+    }
+  });
+  Sentry.setTag('page', 'claim');
+})();
+</script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
