@@ -644,7 +644,9 @@ const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시
   dispenser_unstick:['물림 자동해소','b-g'], dispenser_fault:['배출기 고장','b-a'], dispense_fail:['배출 실패','b-a'],
   link_reset:['보드 통신 복구','b-a'],
   // 2.1.30: 태블릿→보드 명령이 끊긴 때와 되살아난 때만 남는다(예전 link_reset 은 4분마다 쌓였다).
-  link_down:['보드 명령 불통','b-r'], link_up:['보드 명령 복구','b-g'] };
+  link_down:['보드 명령 불통','b-r'], link_up:['보드 명령 복구','b-g'],
+  // 2.1.33: 관리자 화면의 배출 테스트(단발·계속) 결과. detail = {mode, seq, run_id, result, ms} — ms 가 핵심(정상 6.3초, 조기 정지 1초대).
+  dispense_test:['배출 테스트','b-b'] };
 // 배출 고장 사유. stop_stuck = 리미트스위치가 눌린 채 안 떨어짐(캠 정지 위치·스위치 고장·배선 단락).
 const FAULT_KO = { stop_stuck:'스위치 물림', jam:'회전 안 됨(잼)', unstick_fail:'자동해소 실패', locked:'고장 잠금 상태',
   timeout:'응답 없음', not_connected:'보드 미연결', send_failed:'전송 실패', busy:'동작 중', ctrl_unverified:'제어핀 미확정',
@@ -661,6 +663,8 @@ function fmtCell(tabKey, field, v){
   if(tabKey==='events'&&field==='kind'){ const m=EVENT_KO[v]; return m?badge(m[0],m[1]):badge(v,'b-b'); }
   if(tabKey==='events'&&field==='detail'){ const d=typeof v==='object'?v:{}; if(d.reason){ const r=RESET_KO[d.reason]||FAULT_KO[d.reason]||d.reason;
       return `${d.reason==='WDT'?badge('워치독 복구','b-y'):esc(r)}${d.tries?` <span class="muted">${d.tries}회째</span>`:''}${d.fw?` <span class="muted">fw ${esc(d.fw)}</span>`:''}`; }
+    if(d.mode&&d.result){ const ok=d.result==='ok'; const r=ok?'성공':(FAULT_KO[d.result]||d.result);
+      return `${d.mode==='loop'?`연속 ${d.seq}회차`:'단발'} · ${ok?badge('성공','b-g'):badge(esc(r),'b-a')}${d.ms!=null?` <span class="muted">${(d.ms/1000).toFixed(1)}초</span>`:''}`; }
     if(d.result) return esc(d.result==='ok'?'성공':d.result);
     return esc(Object.entries(d).map(([k,x])=>`${k}=${x}`).join(', '))||'<span class="muted">-</span>'; }
   if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
