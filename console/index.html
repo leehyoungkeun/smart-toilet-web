@@ -1602,7 +1602,7 @@ async function renderPromo(orgId){
           <select class="capsz" style="margin-top:4px"><option value="small" ${m.caption_size==='small'?'selected':''}>작게</option><option value="medium" ${(m.caption_size||'medium')==='medium'?'selected':''}>보통</option><option value="large" ${m.caption_size==='large'?'selected':''}>크게</option></select>
           <select class="cappos"><option value="bottom" ${(m.caption_pos||'bottom')==='bottom'?'selected':''}>아래</option><option value="top" ${m.caption_pos==='top'?'selected':''}>위</option></select></td>
       <td style="white-space:nowrap;font-size:13px">${m.kind==='video'?'영상':`사진 표시 <input type="number" class="dur" value="${m.duration_sec}" min="3" max="120" style="width:52px">초`} · 반복 ${repeatSel(m)}<br>
-          ${m.kind==='video'?`<label><input type="checkbox" class="snd" ${m.sound?'checked':''}> 소리</label> 볼륨 <input type="number" class="vol" value="${m.volume==null?100:m.volume}" min="0" max="100" style="width:52px"> · `:''}
+          ${m.kind==='video'?`<label><input type="checkbox" class="snd" ${m.sound?'checked':''}> 소리</label> 볼륨 <input type="number" class="vol" value="${m.volume==null?100:m.volume}" min="0" max="100" style="width:52px"><br>반복 간격 <input type="number" class="gap" value="${m.repeat_gap_sec||0}" min="0" max="60" style="width:52px">초 · 쉬는 동안 <select class="gapscr"><option value="last" ${(m.gap_screen||'last')==='last'?'selected':''}>마지막 장면</option><option value="black" ${m.gap_screen==='black'?'selected':''}>검은 화면</option></select> · `:''}
           <label><input type="checkbox" class="fade" ${m.fade!==false?'checked':''}> 서서히 전환</label> ·
           <select class="fit"><option value="contain" ${(m.fit||'contain')==='contain'?'selected':''}>여백</option><option value="cover" ${m.fit==='cover'?'selected':''}>꽉 채움</option></select></td>
       <td style="white-space:nowrap;font-size:13px">시간 <input type="time" class="tf" value="${(m.show_from||'').slice(0,5)}"> ~ <input type="time" class="tt" value="${(m.show_to||'').slice(0,5)}"><br>
@@ -1721,7 +1721,7 @@ async function renderPromo(orgId){
           show_from:v('.tf'), show_to:v('.tt'), date_from:v('.df'), date_to:v('.dt'),
           days:[...tr.querySelectorAll('.day')].reduce((a,c)=>a+(c.checked?+c.dataset.bit:0),0) };
         const dur=q('.dur'); if(dur) patch.duration_sec=Math.min(120,Math.max(3,parseInt(dur.value,10)||8));
-        const snd=q('.snd'); if(snd){ patch.sound=snd.checked; patch.volume=Math.min(100,Math.max(0,parseInt(q('.vol').value,10)||0)); }
+        const snd=q('.snd'); if(snd){ patch.sound=snd.checked; patch.volume=Math.min(100,Math.max(0,parseInt(q('.vol').value,10)||0)); patch.repeat_gap_sec=Math.min(60,Math.max(0,parseInt(q('.gap').value,10)||0)); patch.gap_screen=q('.gapscr').value; }
         if((patch.show_from&&!patch.show_to)||(!patch.show_from&&patch.show_to)) throw new Error('시간대는 시작과 끝을 둘 다 넣거나 둘 다 비우세요.');
         if(patch.days===0) throw new Error(`"${patch.title||i+1}": 요일을 하나 이상 고르세요.`);
         const {error}=await supabase.from('promo_media').update(patch).eq('id',tr.dataset.id); if(error) throw error; }
