@@ -441,6 +441,7 @@ function renderTable(){
         ${state.role==='platform_admin'?'<button class="btn sm line" id="settings">⚙ 설정</button>':''}
         ${state.role==='platform_admin'?'<button class="btn sm line" id="operators">👤 운영자</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
+        ${(state.role==='platform_admin'||state.role==='org_admin')?'<button class="btn sm line" id="promo">🎬 홍보 콘텐츠</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
     <div class="tscroll"><table>
@@ -457,6 +458,7 @@ function renderTable(){
   t.querySelector('#refresh').onclick=refreshFleet;
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
+  const pr=t.querySelector('#promo'); if(pr) pr.onclick=()=>renderPromo();
   const op=t.querySelector('#operators'); if(op) op.onclick=renderOperators;
   const stg=t.querySelector('#settings'); if(stg) stg.onclick=()=>renderSettings('global');
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
@@ -1560,6 +1562,112 @@ function editOperator(o){
     if(np.length<8) return msg('비밀번호는 8자 이상이어야 합니다.');
     try{ await callFn('reset_password',{id:o.id,password:np}); msg(''); alert('비밀번호가 변경되었습니다.'); }
     catch(e){ msg('재설정 실패: '+e.message); }
+  };
+}
+
+// ── 홍보 콘텐츠(태블릿 대기 화면) ──
+// 지자체 담당자가 영상·사진을 올리면 그 지자체 화장실의 태블릿이 평소에 돌린다(2026-10-02).
+// 파일은 Storage 버킷 promo 의 <org_id>/<uuid>.<ext>, 목록은 promo_media. 한 편 50MB·사진 JPEG/PNG/WebP·영상 MP4.
+// 태블릿은 10분마다 목록을 확인해 새 파일을 받고(LTE 기기는 그만큼 통신료가 든다), 빠진 것은 지운다.
+const PROMO_MAX = 50*1024*1024;
+const promoUrl = (path)=>`${SUPABASE_URL}/storage/v1/object/public/promo/${path}`;
+async function renderPromo(orgId){
+  mountShell();
+  const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
+  let orgs; try{ ({data:orgs}=await supabase.from('organizations').select('id, code, name, parent_id').order('name')); }catch(e){ body.innerHTML=`<div class="err">기관 조회 실패: ${esc(e.message)}</div>`; return; }
+  orgs=orgs||[];
+  // org_admin 은 자기 기관(과 하위)만, 본사는 전부
+  const mine = state.role==='platform_admin' ? orgs : orgs.filter(o=>o.id===state.profile.org_id||o.parent_id===state.profile.org_id);
+  if(!mine.length){ body.innerHTML='<div class="err">콘텐츠를 올릴 수 있는 기관이 없습니다.</div>'; return; }
+  const org = mine.find(o=>o.id===orgId) || mine.find(o=>o.id===state.profile.org_id) || mine[0];
+  let locs=[], items=[];
+  try{
+    ({data:locs}=await supabase.from('locations').select('id, code, name').eq('org_id',org.id).order('name'));
+    ({data:items}=await supabase.from('promo_media').select('*').eq('org_id',org.id).order('sort_order').order('created_at'));
+  }catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  locs=locs||[]; items=items||[];
+  const fmtMB = (b)=> b>=1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
+  const rows = items.map((m,i)=>`<tr data-id="${m.id}" style="${m.active?'':'opacity:.5'}">
+      <td>${i+1}</td>
+      <td>${m.kind==='video'
+          ? `<video src="${promoUrl(m.path)}" muted preload="metadata" style="width:120px;height:68px;object-fit:cover;background:#000;border-radius:6px"></video>`
+          : `<img src="${promoUrl(m.path)}" style="width:120px;height:68px;object-fit:cover;background:#000;border-radius:6px" alt="">`}</td>
+      <td><input class="ttl" value="${esc(m.title)}" placeholder="제목(선택)" style="width:180px"></td>
+      <td>${m.kind==='video'?'영상 · 끝까지':`사진 · <input type="number" class="dur" value="${m.duration_sec}" min="3" max="120" style="width:56px"> 초`}</td>
+      <td><select class="scope"><option value="" ${!m.location_id?'selected':''}>지자체 전체</option>${locs.map(l=>`<option value="${l.id}" ${m.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td>
+      <td class="muted">${fmtMB(m.size_bytes||0)}</td>
+      <td><label><input type="checkbox" class="act" ${m.active?'checked':''}> 켬</label></td>
+      <td style="white-space:nowrap"><button class="btn sm line up" ${i===0?'disabled':''}>▲</button> <button class="btn sm line down" ${i===items.length-1?'disabled':''}>▼</button> <button class="btn sm line del" style="color:#E0322F">삭제</button></td>
+    </tr>`).join('');
+  body.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+      <div><h2 style="margin:0">🎬 홍보 콘텐츠 <span class="muted" style="font-weight:400;font-size:14px">태블릿 대기 화면</span></h2>
+        <div class="muted" style="font-size:13px;margin-top:4px">평소에 이 목록을 순서대로 돌리고, 시민이 화면을 터치하면 이용 메뉴로 갑니다. 영상은 소리 없이 재생됩니다.</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label class="muted">기관</label>
+        <select id="org">${mine.map(o=>`<option value="${o.id}" ${o.id===org.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+        <button class="btn sm line" id="back">← 목록</button></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px;border:1px dashed #C9D2E6;border-radius:10px;margin-bottom:14px">
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple>
+      <select id="newscope"><option value="">지자체 전체</option>${locs.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select>
+      <button class="btn sm" id="upload">올리기</button>
+      <span class="muted" style="font-size:12px">사진 JPG·PNG·WebP, 영상 MP4 · 한 편 50MB까지 · 가로 화면(16:9)에 맞춘 파일이 보기 좋습니다</span>
+      <div id="umsg" style="flex-basis:100%"></div>
+    </div>
+    <div class="tscroll"><table>
+      <thead><tr><th>순서</th><th>미리보기</th><th>제목</th><th>종류 · 표시 시간</th><th>보일 곳</th><th>크기</th><th>사용</th><th></th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">올린 콘텐츠가 없습니다. 콘텐츠가 없으면 태블릿은 지금처럼 이용 메뉴를 보여 줍니다.</td></tr>'}</tbody>
+    </table></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><span class="muted" id="smsg" style="align-self:center"></span><button class="btn" id="save">변경 저장</button></div>
+  </div>`;
+  body.querySelector('#back').onclick=renderDashboard;
+  body.querySelector('#org').onchange=e=>renderPromo(e.target.value);
+  // 올리기: 파일마다 Storage 에 넣고 행을 만든다. 하나가 실패해도 나머지는 올린다.
+  body.querySelector('#upload').onclick=async()=>{
+    const files=[...body.querySelector('#file').files]; const msg=body.querySelector('#umsg');
+    if(!files.length){ msg.innerHTML='<div class="err">파일을 고르세요.</div>'; return; }
+    const scope=body.querySelector('#newscope').value||null; let done=0, fail=[];
+    const uid=(await supabase.auth.getUser()).data.user.id;
+    for(const f of files){
+      if(f.size>PROMO_MAX){ fail.push(`${f.name}: 50MB 초과`); continue; }
+      const kind=f.type.startsWith('video/')?'video':(f.type.startsWith('image/')?'image':null);
+      if(!kind){ fail.push(`${f.name}: 지원하지 않는 형식`); continue; }
+      const ext=(f.name.split('.').pop()||'bin').toLowerCase(); const path=`${org.id}/${crypto.randomUUID()}.${ext}`;
+      msg.innerHTML=`<div class="muted">${esc(f.name)} 올리는 중… (${done+1}/${files.length})</div>`;
+      try{
+        const {error:ue}=await supabase.storage.from('promo').upload(path,f,{contentType:f.type,upsert:false}); if(ue) throw ue;
+        const {error:ie}=await supabase.from('promo_media').insert({org_id:org.id, location_id:scope, kind, path, title:f.name.replace(/\.[^.]+$/,''), size_bytes:f.size, sort_order:items.length+done, created_by:uid});
+        if(ie){ await supabase.storage.from('promo').remove([path]).catch(()=>{}); throw ie; }
+        done++;
+      }catch(e){ fail.push(`${f.name}: ${e.message}`); }
+    }
+    msg.innerHTML=`<div class="${fail.length?'err':'ok'}">${done}개 올림${fail.length?' · 실패: '+esc(fail.join(' / ')):''}</div>`;
+    if(done) setTimeout(()=>renderPromo(org.id), 800);
+  };
+  // 순서 바꾸기는 화면에서만 움직이고 "변경 저장" 때 한꺼번에 쓴다.
+  const tb=body.querySelector('tbody');
+  const renum=()=>{ [...tb.querySelectorAll('tr[data-id]')].forEach((tr,i,arr)=>{ tr.children[0].textContent=i+1; tr.querySelector('.up').disabled=i===0; tr.querySelector('.down').disabled=i===arr.length-1; }); };
+  tb.querySelectorAll('tr[data-id]').forEach(tr=>{
+    tr.querySelector('.up').onclick=()=>{ const p=tr.previousElementSibling; if(p) tb.insertBefore(tr,p); renum(); };
+    tr.querySelector('.down').onclick=()=>{ const n=tr.nextElementSibling; if(n) tb.insertBefore(n,tr); renum(); };
+    tr.querySelector('.del').onclick=async()=>{
+      const m=items.find(x=>x.id===tr.dataset.id); if(!confirm(`"${m.title||m.path}" 을(를) 삭제할까요? 태블릿에서도 10분 안에 사라집니다.`)) return;
+      try{ const {error}=await supabase.from('promo_media').delete().eq('id',m.id); if(error) throw error;
+           await supabase.storage.from('promo').remove([m.path]).catch(()=>{}); renderPromo(org.id); }
+      catch(e){ alert('삭제 실패: '+e.message); }
+    };
+  });
+  body.querySelector('#save').onclick=async()=>{
+    const smsg=body.querySelector('#smsg'); smsg.textContent='저장 중…';
+    try{
+      const trs=[...tb.querySelectorAll('tr[data-id]')];
+      for(let i=0;i<trs.length;i++){ const tr=trs[i]; const dur=tr.querySelector('.dur');
+        const patch={ sort_order:i, title:tr.querySelector('.ttl').value.trim(), location_id:tr.querySelector('.scope').value||null, active:tr.querySelector('.act').checked };
+        if(dur) patch.duration_sec=Math.min(120,Math.max(3,parseInt(dur.value,10)||8));
+        const {error}=await supabase.from('promo_media').update(patch).eq('id',tr.dataset.id); if(error) throw error; }
+      smsg.textContent='저장했습니다. 태블릿에는 10분 안에 반영됩니다.'; setTimeout(()=>renderPromo(org.id),900);
+    }catch(e){ smsg.textContent=''; alert('저장 실패: '+e.message); }
   };
 }
 
