@@ -1569,9 +1569,26 @@ function editOperator(o){
 // 지자체 담당자·운영자가 영상·사진을 올리면 그 지자체 화장실의 태블릿이 평소에 돌린다(2026-10-02).
 // 파일은 Storage 버킷 promo 의 <org_id>/<uuid>.<ext>, 목록은 promo_media, 기관 설정은 promo_org_settings. 한 편 50MB.
 // 저장하면 realtime 으로 태블릿에 즉시 반영된다(앱 2.1.38+). 통계는 promo_play_stats(단말이 10분마다 모아 올림).
+//
+// 화면 원칙(2026-10-02 사용자: "너무 혼잡해, 알기 쉽고 간결하게"): 목록에는 요약만 보이고, 세부 설정은 행마다 "설정" 으로
+// 넓은 창을 열어 구역(기본·재생·자막·보일 때)별로 고친다. 순서·사용·기관 설정은 바꾸는 즉시 저장된다 — 큰 "변경 저장" 버튼이 없다.
 const PROMO_MAX = 50*1024*1024;
 const promoUrl = (path)=>`${SUPABASE_URL}/storage/v1/object/public/promo/${path}`;
 const DAY_KO = ['일','월','화','수','목','금','토'];
+const HINT_DEFAULT = '화면을 터치하면 이용 메뉴로 이동합니다';
+function promoDaysLabel(d){ if(d==null||d===127) return '매일'; if(d===62) return '평일'; if(d===65) return '주말'; return DAY_KO.filter((_,i)=>d&(1<<i)).join('·')||'없음'; }
+function promoWhenLabel(m){
+  const p=[];
+  if(m.show_from&&m.show_to) p.push(`${m.show_from.slice(0,5)}~${m.show_to.slice(0,5)}`);
+  if(m.date_from||m.date_to) p.push(`${m.date_from?m.date_from.slice(5).replace('-','/'):''}~${m.date_to?m.date_to.slice(5).replace('-','/'):''}`);
+  const d=promoDaysLabel(m.days); if(d!=='매일') p.push(d);
+  return p.length?p.join(' · '):'항상';
+}
+function promoPlayLabel(m){
+  const rep = m.repeat_forever ? '계속' : `${m.repeat_count||1}회`;
+  if(m.kind==='video') return `영상 · ${rep}${m.repeat_gap_sec?` · 간격 ${m.repeat_gap_sec}초`:''}${m.sound?` · 소리 ${m.volume==null?100:m.volume}`:''}`;
+  return `사진 · ${m.duration_sec}초 · ${rep}`;
+}
 async function renderPromo(orgId){
   mountShell();
   const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
@@ -1587,67 +1604,69 @@ async function renderPromo(orgId){
     try{ stats=await rpc('promo_stats',{p_org:org.id}); }catch(e){ stats=[]; }
   }catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
   locs=locs||[]; items=items||[]; stats=stats||[];
-  os = os || { enabled:true, play_mode:'order', hint_text:'화면을 터치하면 이용 메뉴로 이동합니다' };
+  os = os || { enabled:true, play_mode:'order', hint_text:HINT_DEFAULT };
   const statOf=(id)=>stats.find(s=>s.media_id===id);
-  const fmtMB = (b)=> b>=1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
-  const dayBoxes=(d)=>DAY_KO.map((k,i)=>`<label style="margin-right:4px"><input type="checkbox" class="day" data-bit="${1<<i}" ${(d&(1<<i))?'checked':''}>${k}</label>`).join('');
-  const repeatSel=(m)=>`<select class="rep">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${!m.repeat_forever&&(m.repeat_count||1)===n?'selected':''}>${n}회</option>`).join('')}<option value="forever" ${m.repeat_forever?'selected':''}>계속</option></select>`;
+  const locName=(id)=> id ? ((locs.find(l=>l.id===id)||{}).name||'(삭제된 화장실)') : '지자체 전체';
+  const fmtMB=(b)=> b>=1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
+  const thumb=(m)=> m.kind==='video'
+      ? `<video src="${promoUrl(m.path)}#t=0.5" muted preload="metadata" style="width:112px;height:63px;object-fit:cover;background:#000;border-radius:6px"></video>`
+      : `<img src="${promoUrl(m.path)}" style="width:112px;height:63px;object-fit:cover;background:#000;border-radius:6px" alt="">`;
   const rows = items.map((m,i)=>{ const s=statOf(m.id); return `<tr data-id="${m.id}" draggable="true" style="${m.active?'':'opacity:.5'}">
       <td style="white-space:nowrap"><input type="number" class="ord" value="${i+1}" min="1" max="${items.length}" style="width:46px"> <span class="muted" style="cursor:grab" title="끌어서 옮기기">☰</span></td>
-      <td>${m.kind==='video'
-          ? `<video src="${promoUrl(m.path)}#t=0.5" muted preload="metadata" controls style="width:140px;height:80px;object-fit:cover;background:#000;border-radius:6px"></video>`
-          : `<img src="${promoUrl(m.path)}" style="width:140px;height:80px;object-fit:cover;background:#000;border-radius:6px" alt="">`}</td>
-      <td><input class="ttl" value="${esc(m.title)}" placeholder="제목(선택)" style="width:150px"><br>
-          <input class="cap" value="${esc(m.caption||'')}" placeholder="자막(선택)" style="width:150px;margin-top:4px">
-          <select class="capsz" style="margin-top:4px"><option value="small" ${m.caption_size==='small'?'selected':''}>작게</option><option value="medium" ${(m.caption_size||'medium')==='medium'?'selected':''}>보통</option><option value="large" ${m.caption_size==='large'?'selected':''}>크게</option></select>
-          <select class="cappos"><option value="bottom" ${(m.caption_pos||'bottom')==='bottom'?'selected':''}>아래</option><option value="top" ${m.caption_pos==='top'?'selected':''}>위</option></select></td>
-      <td style="white-space:nowrap;font-size:13px">${m.kind==='video'?'영상':`사진 표시 <input type="number" class="dur" value="${m.duration_sec}" min="3" max="120" style="width:52px">초`} · 반복 ${repeatSel(m)}<br>
-          ${m.kind==='video'?`<label><input type="checkbox" class="snd" ${m.sound?'checked':''}> 소리</label> 볼륨 <input type="number" class="vol" value="${m.volume==null?100:m.volume}" min="0" max="100" style="width:52px"><br>반복 간격 <input type="number" class="gap" value="${m.repeat_gap_sec||0}" min="0" max="60" style="width:52px">초 · 쉬는 동안 <select class="gapscr"><option value="last" ${(m.gap_screen||'last')==='last'?'selected':''}>마지막 장면</option><option value="black" ${m.gap_screen==='black'?'selected':''}>검은 화면</option></select> · `:''}
-          <label><input type="checkbox" class="fade" ${m.fade!==false?'checked':''}> 서서히 전환</label> ·
-          <select class="fit"><option value="contain" ${(m.fit||'contain')==='contain'?'selected':''}>여백</option><option value="cover" ${m.fit==='cover'?'selected':''}>꽉 채움</option></select></td>
-      <td style="white-space:nowrap;font-size:13px">시간 <input type="time" class="tf" value="${(m.show_from||'').slice(0,5)}"> ~ <input type="time" class="tt" value="${(m.show_to||'').slice(0,5)}"><br>
-          기간 <input type="date" class="df" value="${m.date_from||''}"> ~ <input type="date" class="dt" value="${m.date_to||''}"><br>
-          <span class="days">${dayBoxes(m.days==null?127:m.days)}</span></td>
-      <td><select class="scope"><option value="" ${!m.location_id?'selected':''}>지자체 전체</option>${locs.map(l=>`<option value="${l.id}" ${m.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td>
-      <td class="muted" style="font-size:12px">${fmtMB(m.size_bytes||0)}<br>${s?`재생 ${s.plays}회<br>${fmtDt(s.last_at)}`:'재생 0회'}</td>
-      <td><label><input type="checkbox" class="act" ${m.active?'checked':''}> 켬</label></td>
-      <td style="white-space:nowrap"><button class="btn sm line top" title="맨 앞">⤒</button> <button class="btn sm line up">▲</button> <button class="btn sm line down">▼</button> <button class="btn sm line bottom" title="맨 뒤">⤓</button> <button class="btn sm line del" style="color:#E0322F">삭제</button></td>
+      <td>${thumb(m)}</td>
+      <td><b>${esc(m.title||'(제목 없음)')}</b>${m.caption?`<div class="muted" style="font-size:12px">자막: ${esc(m.caption)}</div>`:''}</td>
+      <td>${esc(promoPlayLabel(m))}</td>
+      <td>${esc(promoWhenLabel(m))}</td>
+      <td>${esc(locName(m.location_id))}</td>
+      <td class="muted" style="font-size:12px;white-space:nowrap">${fmtMB(m.size_bytes||0)}${s?` · ${s.plays}회`:''}</td>
+      <td><label><input type="checkbox" class="act" ${m.active?'checked':''}> 사용</label></td>
+      <td style="white-space:nowrap"><button class="btn sm line cfg">설정</button> <button class="btn sm line del" style="color:#E0322F">삭제</button></td>
     </tr>`; }).join('');
   body.innerHTML=`<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
       <div><h2 style="margin:0">🎬 홍보 콘텐츠 <span class="muted" style="font-weight:400;font-size:14px">태블릿 대기 화면</span></h2>
-        <div class="muted" style="font-size:13px;margin-top:4px">저장하면 태블릿에 바로 반영됩니다. 영상은 "소리"를 켜지 않으면 소리 없이 재생되고, 반복 "계속"은 터치 전까지 그 항목만 돕니다.</div></div>
+        <div class="muted" style="font-size:13px;margin-top:4px">바꾸면 태블릿에 바로 반영됩니다. 행의 "설정"에서 재생·자막·보일 때를 정합니다.</div></div>
       <div style="display:flex;gap:8px;align-items:center">
         <label class="muted">기관</label>
         <select id="org">${mine.map(o=>`<option value="${o.id}" ${o.id===org.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
         <button class="btn sm line" id="copy" ${mine.length>1?'':'disabled'}>다른 기관으로 복사</button>
         <button class="btn sm line" id="back">← 목록</button></div>
     </div>
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px;background:#F4F6FB;border-radius:10px;margin-bottom:12px">
-      <label><input type="checkbox" id="os_enabled" ${os.enabled?'checked':''}> <b>이 기관 홍보 화면 켬</b></label>
+    <div class="fsec" style="margin:0 0 10px;padding:9px 14px;font-size:14.5px;background:#EEF2FB;border-left:4px solid #4353E0;border-radius:8px">이 기관의 대기 화면</div>
+    <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap;padding:6px 4px 16px">
+      <label><input type="checkbox" id="os_enabled" ${os.enabled?'checked':''}> <b>켬</b> <span class="muted" style="font-size:12px">끄면 모든 태블릿이 메뉴 화면만 보입니다</span></label>
       <span>재생 방식 <select id="os_mode"><option value="order" ${os.play_mode==='order'?'selected':''}>순서대로</option><option value="random" ${os.play_mode==='random'?'selected':''}>무작위</option><option value="video_first" ${os.play_mode==='video_first'?'selected':''}>영상 먼저</option></select></span>
-      <span>하단 안내 문구 <input id="os_hint" value="${esc(os.hint_text)}" style="width:300px"></span>
+      <span>안내 문구 <input id="os_hint" value="${esc(os.hint_text)}" style="width:320px"></span>
+      <span class="muted" id="os_msg" style="font-size:12px"></span>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px;border:1px dashed #C9D2E6;border-radius:10px;margin-bottom:14px">
+    <div class="fsec" style="margin:0 0 10px;padding:9px 14px;font-size:14.5px;background:#EEF2FB;border-left:4px solid #4353E0;border-radius:8px">올리기</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 4px 16px">
       <input type="file" id="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple>
       <select id="newscope"><option value="">지자체 전체</option>${locs.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select>
       <button class="btn sm" id="upload">올리기</button>
-      <span class="muted" style="font-size:12px">사진 JPG·PNG·WebP, 영상 MP4 · 한 편 50MB까지 · 가로 화면(16:9)에 맞춘 파일이 보기 좋습니다</span>
+      <span class="muted" style="font-size:12px">사진 JPG·PNG·WebP, 영상 MP4 · 한 편 50MB까지 · 가로(16:9) 파일이 보기 좋습니다</span>
       <div id="umsg" style="flex-basis:100%"></div>
     </div>
+    <div class="fsec" style="margin:0 0 10px;padding:9px 14px;font-size:14.5px;background:#EEF2FB;border-left:4px solid #4353E0;border-radius:8px">목록 <span class="muted" style="font-weight:400;font-size:12.5px">순서는 번호를 고치거나 ☰ 를 끌어 옮기면 바로 저장됩니다</span></div>
     <div class="tscroll"><table>
-      <thead><tr><th>순서</th><th>미리보기</th><th>제목 · 자막</th><th>재생</th><th>보일 때 (비우면 항상)</th><th>보일 곳</th><th>크기 · 통계</th><th>사용</th><th></th></tr></thead>
+      <thead><tr><th>순서</th><th>미리보기</th><th>제목</th><th>재생</th><th>보일 때</th><th>보일 곳</th><th>크기 · 재생 횟수</th><th>사용</th><th></th></tr></thead>
       <tbody>${rows||'<tr><td colspan="9" class="muted" style="text-align:center;padding:30px">올린 콘텐츠가 없습니다. 콘텐츠가 없으면 태블릿은 지금처럼 이용 메뉴를 보여 줍니다.</td></tr>'}</tbody>
     </table></div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><span class="muted" id="smsg" style="align-self:center"></span><button class="btn" id="save">변경 저장</button></div>
+    <div class="muted" id="lmsg" style="font-size:12px;margin-top:8px"></div>
   </div>`;
-  body.querySelector('#back').onclick=renderDashboard;
-  body.querySelector('#org').onchange=e=>renderPromo(e.target.value);
-  // 올리기: 파일마다 Storage 에 넣고 행을 만든다. 하나가 실패해도 나머지는 올린다. 제목은 원래 파일 이름.
-  body.querySelector('#upload').onclick=async()=>{
-    const files=[...body.querySelector('#file').files]; const msg=body.querySelector('#umsg');
+  const q=(sel)=>body.querySelector(sel);
+  q('#back').onclick=renderDashboard;
+  q('#org').onchange=e=>renderPromo(e.target.value);
+  // 기관 설정: 바꾸는 즉시 저장
+  const saveOrg=async()=>{ const msg=q('#os_msg'); msg.textContent='저장 중…';
+    const {error}=await supabase.from('promo_org_settings').upsert({org_id:org.id, enabled:q('#os_enabled').checked, play_mode:q('#os_mode').value, hint_text:q('#os_hint').value.trim()||HINT_DEFAULT});
+    msg.textContent=error?('저장 실패: '+error.message):'저장됨'; if(!error) setTimeout(()=>{ msg.textContent=''; },1500); };
+  q('#os_enabled').onchange=saveOrg; q('#os_mode').onchange=saveOrg; q('#os_hint').onchange=saveOrg;
+  // 올리기: 파일마다 Storage 에 넣고 행을 만든다. 하나가 실패해도 나머지는 올린다. 제목은 원래 파일 이름(UUID 같은 이름이면 "사진 N").
+  q('#upload').onclick=async()=>{
+    const files=[...q('#file').files]; const msg=q('#umsg');
     if(!files.length){ msg.innerHTML='<div class="err">파일을 고르세요.</div>'; return; }
-    const scope=body.querySelector('#newscope').value||null; let done=0, fail=[];
+    const scope=q('#newscope').value||null; let done=0, fail=[];
     const uid=(await supabase.auth.getUser()).data.user.id;
     for(const f of files){
       if(f.size>PROMO_MAX){ fail.push(`${f.name}: 50MB 초과`); continue; }
@@ -1666,37 +1685,38 @@ async function renderPromo(orgId){
     msg.innerHTML=`<div class="${fail.length?'err':'ok'}">${done}개 올림${fail.length?' · 실패: '+esc(fail.join(' / ')):''}</div>`;
     if(done) setTimeout(()=>renderPromo(org.id), 800);
   };
-  // 순서: 번호 입력·끌어서 옮기기·▲▼·맨 앞/맨 뒤. 화면에서만 움직이고 "변경 저장" 때 한꺼번에 쓴다.
-  const tb=body.querySelector('tbody');
-  const rowsOf=()=>[...tb.querySelectorAll('tr[data-id]')];
-  const renum=()=>rowsOf().forEach((tr,i)=>{ tr.querySelector('.ord').value=i+1; });
+  // 순서: 번호 입력·끌어서 옮기기 → 바로 저장
+  const tb=q('tbody'); const rowsOf=()=>[...tb.querySelectorAll('tr[data-id]')];
+  const saveOrder=async()=>{ const lm=q('#lmsg'); lm.textContent='순서 저장 중…';
+    const trs=rowsOf(); trs.forEach((tr,i)=>{ tr.querySelector('.ord').value=i+1; });
+    for(let i=0;i<trs.length;i++){ const {error}=await supabase.from('promo_media').update({sort_order:i}).eq('id',trs[i].dataset.id); if(error){ lm.textContent='순서 저장 실패: '+error.message; return; } }
+    lm.textContent='순서 저장됨'; setTimeout(()=>{ lm.textContent=''; },1500); };
   let dragging=null;
   rowsOf().forEach(tr=>{
-    tr.querySelector('.up').onclick=()=>{ const p=tr.previousElementSibling; if(p) tb.insertBefore(tr,p); renum(); };
-    tr.querySelector('.down').onclick=()=>{ const n=tr.nextElementSibling; if(n) tb.insertBefore(n,tr); renum(); };
-    tr.querySelector('.top').onclick=()=>{ tb.insertBefore(tr,tb.firstElementChild); renum(); };
-    tr.querySelector('.bottom').onclick=()=>{ tb.appendChild(tr); renum(); };
-    tr.querySelector('.ord').onchange=e=>{ const want=Math.max(1,Math.min(rowsOf().length,parseInt(e.target.value,10)||1)); const others=rowsOf().filter(r=>r!==tr); const ref=others[want-1]; if(ref) tb.insertBefore(tr,ref); else tb.appendChild(tr); renum(); };
+    const m=items.find(x=>x.id===tr.dataset.id);
+    tr.querySelector('.ord').onchange=e=>{ const want=Math.max(1,Math.min(rowsOf().length,parseInt(e.target.value,10)||1)); const others=rowsOf().filter(r=>r!==tr); const ref=others[want-1]; if(ref) tb.insertBefore(tr,ref); else tb.appendChild(tr); saveOrder(); };
     tr.addEventListener('dragstart',()=>{ dragging=tr; tr.style.opacity=.4; });
-    tr.addEventListener('dragend',()=>{ tr.style.opacity=''; dragging=null; renum(); });
+    tr.addEventListener('dragend',()=>{ tr.style.opacity=m.active?'':'.5'; dragging=null; saveOrder(); });
     tr.addEventListener('dragover',e=>{ e.preventDefault(); if(!dragging||dragging===tr) return; const r=tr.getBoundingClientRect(); const after=(e.clientY-r.top)>r.height/2; tb.insertBefore(dragging, after?tr.nextSibling:tr); });
+    tr.querySelector('.act').onchange=async e=>{ const {error}=await supabase.from('promo_media').update({active:e.target.checked}).eq('id',m.id); if(error){ alert('저장 실패: '+error.message); e.target.checked=!e.target.checked; return; } tr.style.opacity=e.target.checked?'':'.5'; };
+    tr.querySelector('.cfg').onclick=()=>promoEdit(m, locs, ()=>renderPromo(org.id));
     tr.querySelector('.del').onclick=async()=>{
-      const m=items.find(x=>x.id===tr.dataset.id); if(!confirm(`"${m.title||m.path}" 을(를) 삭제할까요? 태블릿에서도 바로 사라집니다.`)) return;
+      if(!confirm(`"${m.title||m.path}" 을(를) 삭제할까요? 태블릿에서도 바로 사라집니다.`)) return;
       try{ const {error}=await supabase.from('promo_media').delete().eq('id',m.id); if(error) throw error;
            await supabase.storage.from('promo').remove([m.path]).catch(()=>{}); renderPromo(org.id); }
       catch(e){ alert('삭제 실패: '+e.message); }
     };
   });
   // 다른 기관으로 복사: 파일을 받아 그 기관 폴더에 다시 올리고 설정을 그대로 복사한다(원본을 지워도 복사본은 남는다).
-  body.querySelector('#copy').onclick=async()=>{
+  q('#copy').onclick=async()=>{
     const others=mine.filter(o=>o.id!==org.id); if(!others.length) return;
     const pick=prompt('복사할 기관 번호를 고르세요:\n'+others.map((o,i)=>`${i+1}. ${o.name}`).join('\n'));
     const to=others[parseInt(pick,10)-1]; if(!to) return;
     if(!confirm(`"${org.name}" 의 콘텐츠 ${items.length}개와 설정을 "${to.name}" 으로 복사할까요? (${to.name} 의 기존 콘텐츠는 그대로 둡니다)`)) return;
-    const msg=body.querySelector('#smsg'); let done=0, fail=0;
+    const lm=q('#lmsg'); let done=0, fail=0;
     for(const m of items){
       try{
-        msg.textContent=`복사 중… ${done+fail+1}/${items.length}`;
+        lm.textContent=`복사 중… ${done+fail+1}/${items.length}`;
         const r=await fetch(promoUrl(m.path)); if(!r.ok) throw new Error('파일 받기 실패'); const blob=await r.blob();
         const ext=m.path.split('.').pop(); const path=`${to.id}/${crypto.randomUUID()}.${ext}`;
         const {error:ue}=await supabase.storage.from('promo').upload(path,blob,{contentType:blob.type||(m.kind==='video'?'video/mp4':'image/jpeg')}); if(ue) throw ue;
@@ -1705,28 +1725,68 @@ async function renderPromo(orgId){
       }catch(e){ fail++; }
     }
     await supabase.from('promo_org_settings').upsert({org_id:to.id, enabled:os.enabled, play_mode:os.play_mode, hint_text:os.hint_text}).catch(()=>{});
-    msg.textContent=`복사 완료: ${done}개${fail?` · 실패 ${fail}개`:''}`;
+    lm.textContent=`복사 완료: ${done}개${fail?` · 실패 ${fail}개`:''}`;
   };
-  body.querySelector('#save').onclick=async()=>{
-    const smsg=body.querySelector('#smsg'); smsg.textContent='저장 중…';
+}
+// 한 항목의 세부 설정 — 넓은 창, 구역별. 저장하면 바로 반영.
+function promoEdit(m, locs, onDone){
+  const isV=m.kind==='video';
+  const days=m.days==null?127:m.days;
+  const bd=modalEl(`
+    <h2 style="margin:0 0 4px">${isV?'🎞 영상':'🖼 사진'} 설정 <span class="muted" style="font-weight:400;font-size:14px">${esc(m.title||'')}</span></h2>
+    <div class="fsec">기본</div>
+    <div class="grid2">
+      <div><label class="f">제목</label><input id="p_title" value="${esc(m.title||'')}"></div>
+      <div><label class="f">보일 곳</label><select id="p_scope"><option value="" ${!m.location_id?'selected':''}>지자체 전체</option>${locs.map(l=>`<option value="${l.id}" ${m.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></div>
+      <div><label class="f">사용</label><label><input type="checkbox" id="p_active" ${m.active?'checked':''}> 태블릿에 보임</label></div>
+    </div>
+    <div class="fsec">재생</div>
+    <div class="grid2">
+      <div><label class="f">반복</label><select id="p_rep">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${!m.repeat_forever&&(m.repeat_count||1)===n?'selected':''}>${n}회</option>`).join('')}<option value="forever" ${m.repeat_forever?'selected':''}>계속 (터치 전까지)</option></select></div>
+      ${isV?`
+      <div><label class="f">반복 간격</label><div style="display:flex;gap:8px;align-items:center"><input type="number" id="p_gap" value="${m.repeat_gap_sec||0}" min="0" max="60" style="width:80px"> 초 <span class="muted" style="font-size:12px">0 = 바로</span></div></div>
+      <div><label class="f">쉬는 동안 화면</label><select id="p_gapscr"><option value="last" ${(m.gap_screen||'last')==='last'?'selected':''}>마지막 장면 유지</option><option value="black" ${m.gap_screen==='black'?'selected':''}>검은 화면</option></select></div>
+      <div><label class="f">소리</label><div style="display:flex;gap:10px;align-items:center"><label><input type="checkbox" id="p_snd" ${m.sound?'checked':''}> 켬</label> 볼륨 <input type="number" id="p_vol" value="${m.volume==null?100:m.volume}" min="0" max="100" style="width:80px"></div></div>`
+      :`<div><label class="f">표시 시간</label><div style="display:flex;gap:8px;align-items:center"><input type="number" id="p_dur" value="${m.duration_sec||8}" min="3" max="120" style="width:80px"> 초</div></div>`}
+      <div><label class="f">전환</label><label><input type="checkbox" id="p_fade" ${m.fade!==false?'checked':''}> 서서히 바뀜</label></div>
+      <div><label class="f">화면 맞춤</label><select id="p_fit"><option value="contain" ${(m.fit||'contain')==='contain'?'selected':''}>여백 두고 전체 보임</option><option value="cover" ${m.fit==='cover'?'selected':''}>꽉 채움 (가장자리 잘릴 수 있음)</option></select></div>
+    </div>
+    <div class="fsec">자막</div>
+    <div class="grid2">
+      <div style="grid-column:span 2"><label class="f">문구 <span class="muted">(비우면 없음)</span></label><input id="p_cap" value="${esc(m.caption||'')}" placeholder="예: 10월 자라섬 재즈축제"></div>
+      <div><label class="f">크기 · 위치</label><div style="display:flex;gap:8px"><select id="p_capsz"><option value="small" ${m.caption_size==='small'?'selected':''}>작게</option><option value="medium" ${(m.caption_size||'medium')==='medium'?'selected':''}>보통</option><option value="large" ${m.caption_size==='large'?'selected':''}>크게</option></select><select id="p_cappos"><option value="bottom" ${(m.caption_pos||'bottom')==='bottom'?'selected':''}>아래</option><option value="top" ${m.caption_pos==='top'?'selected':''}>위</option></select></div></div>
+    </div>
+    <div class="fsec">보일 때 <span class="muted" style="font-weight:400;font-size:12.5px">비우면 항상</span></div>
+    <div class="grid2">
+      <div><label class="f">하루 중 시간대</label><div style="display:flex;gap:6px;align-items:center"><input type="time" id="p_tf" value="${(m.show_from||'').slice(0,5)}"> ~ <input type="time" id="p_tt" value="${(m.show_to||'').slice(0,5)}"></div><div class="muted" style="font-size:12px;margin-top:4px">22:00~06:00처럼 자정을 넘겨도 됩니다</div></div>
+      <div><label class="f">기간</label><div style="display:flex;gap:6px;align-items:center"><input type="date" id="p_df" value="${m.date_from||''}"> ~ <input type="date" id="p_dt" value="${m.date_to||''}"></div></div>
+      <div><label class="f">요일</label><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${DAY_KO.map((k,i)=>`<label><input type="checkbox" class="p_day" data-bit="${1<<i}" ${(days&(1<<i))?'checked':''}>${k}</label>`).join('')}
+        <button type="button" class="btn sm line" id="p_dall">매일</button><button type="button" class="btn sm line" id="p_dwk">평일</button><button type="button" class="btn sm line" id="p_dwe">주말</button></div></div>
+    </div>
+    <div class="mfoot"><button class="btn" id="p_save">저장</button><button class="btn line" id="p_cancel">닫기</button><span class="muted" id="e_msg"></span></div>
+  `,'wide');
+  const g=(id)=>bd.querySelector('#'+id);
+  const setDays=(mask)=>bd.querySelectorAll('.p_day').forEach(c=>{ c.checked=!!(mask&+c.dataset.bit); });
+  g('p_dall').onclick=()=>setDays(127); g('p_dwk').onclick=()=>setDays(62); g('p_dwe').onclick=()=>setDays(65);
+  g('p_cancel').onclick=()=>bd.remove();
+  g('p_save').onclick=async()=>{
+    const msg=g('e_msg'); msg.textContent='저장 중…';
     try{
-      const {error:se}=await supabase.from('promo_org_settings').upsert({org_id:org.id, enabled:body.querySelector('#os_enabled').checked, play_mode:body.querySelector('#os_mode').value, hint_text:body.querySelector('#os_hint').value.trim()||'화면을 터치하면 이용 메뉴로 이동합니다'});
-      if(se) throw se;
-      const trs=rowsOf();
-      for(let i=0;i<trs.length;i++){ const tr=trs[i]; const q=(c)=>tr.querySelector(c); const v=(c)=>q(c).value||null;
-        const rep=q('.rep').value;
-        const patch={ sort_order:i, title:q('.ttl').value.trim(), caption:q('.cap').value.trim(), caption_size:q('.capsz').value, caption_pos:q('.cappos').value,
-          location_id:v('.scope'), active:q('.act').checked, fade:q('.fade').checked, fit:q('.fit').value,
-          repeat_forever:rep==='forever', repeat_count:rep==='forever'?1:Math.min(10,Math.max(1,parseInt(rep,10)||1)),
-          show_from:v('.tf'), show_to:v('.tt'), date_from:v('.df'), date_to:v('.dt'),
-          days:[...tr.querySelectorAll('.day')].reduce((a,c)=>a+(c.checked?+c.dataset.bit:0),0) };
-        const dur=q('.dur'); if(dur) patch.duration_sec=Math.min(120,Math.max(3,parseInt(dur.value,10)||8));
-        const snd=q('.snd'); if(snd){ patch.sound=snd.checked; patch.volume=Math.min(100,Math.max(0,parseInt(q('.vol').value,10)||0)); patch.repeat_gap_sec=Math.min(60,Math.max(0,parseInt(q('.gap').value,10)||0)); patch.gap_screen=q('.gapscr').value; }
-        if((patch.show_from&&!patch.show_to)||(!patch.show_from&&patch.show_to)) throw new Error('시간대는 시작과 끝을 둘 다 넣거나 둘 다 비우세요.');
-        if(patch.days===0) throw new Error(`"${patch.title||i+1}": 요일을 하나 이상 고르세요.`);
-        const {error}=await supabase.from('promo_media').update(patch).eq('id',tr.dataset.id); if(error) throw error; }
-      smsg.textContent='저장했습니다. 태블릿에 바로 반영됩니다.'; setTimeout(()=>renderPromo(org.id),900);
-    }catch(e){ smsg.textContent=''; alert('저장 실패: '+e.message); }
+      const rep=g('p_rep').value;
+      const patch={ title:g('p_title').value.trim(), location_id:g('p_scope').value||null, active:g('p_active').checked,
+        repeat_forever:rep==='forever', repeat_count:rep==='forever'?1:Math.min(10,Math.max(1,parseInt(rep,10)||1)),
+        fade:g('p_fade').checked, fit:g('p_fit').value,
+        caption:g('p_cap').value.trim(), caption_size:g('p_capsz').value, caption_pos:g('p_cappos').value,
+        show_from:g('p_tf').value||null, show_to:g('p_tt').value||null, date_from:g('p_df').value||null, date_to:g('p_dt').value||null,
+        days:[...bd.querySelectorAll('.p_day')].reduce((a,c)=>a+(c.checked?+c.dataset.bit:0),0) };
+      if(isV){ patch.sound=g('p_snd').checked; patch.volume=Math.min(100,Math.max(0,parseInt(g('p_vol').value,10)||0));
+               patch.repeat_gap_sec=Math.min(60,Math.max(0,parseInt(g('p_gap').value,10)||0)); patch.gap_screen=g('p_gapscr').value; }
+      else patch.duration_sec=Math.min(120,Math.max(3,parseInt(g('p_dur').value,10)||8));
+      if((patch.show_from&&!patch.show_to)||(!patch.show_from&&patch.show_to)) throw new Error('시간대는 시작과 끝을 둘 다 넣거나 둘 다 비우세요.');
+      if(patch.days===0) throw new Error('요일을 하나 이상 고르세요.');
+      const {error}=await supabase.from('promo_media').update(patch).eq('id',m.id); if(error) throw error;
+      bd.remove(); onDone();
+    }catch(e){ msg.textContent='저장 실패: '+e.message; }
   };
 }
 
