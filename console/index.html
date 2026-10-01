@@ -441,7 +441,7 @@ function renderTable(){
         ${state.role==='platform_admin'?'<button class="btn sm line" id="settings">⚙ 설정</button>':''}
         ${state.role==='platform_admin'?'<button class="btn sm line" id="operators">👤 운영자</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
-        ${(state.role==='platform_admin'||state.role==='org_admin')?'<button class="btn sm line" id="promo">🎬 홍보 콘텐츠</button>':''}
+        ${state.role?'<button class="btn sm line" id="promo">🎬 홍보 콘텐츠</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
     <div class="tscroll"><table>
@@ -1574,10 +1574,9 @@ const promoUrl = (path)=>`${SUPABASE_URL}/storage/v1/object/public/promo/${path}
 async function renderPromo(orgId){
   mountShell();
   const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
-  let orgs; try{ ({data:orgs}=await supabase.from('organizations').select('id, code, name, parent_id').order('name')); }catch(e){ body.innerHTML=`<div class="err">기관 조회 실패: ${esc(e.message)}</div>`; return; }
-  orgs=orgs||[];
-  // org_admin 은 자기 기관(과 하위)만, 본사는 전부
-  const mine = state.role==='platform_admin' ? orgs : orgs.filter(o=>o.id===state.profile.org_id||o.parent_id===state.profile.org_id);
+  // 내가 관리할 수 있는 기관 — 본사는 전부, 지자체 담당자는 자기 기관(과 하위), 운영자는 배정된 화장실의 기관(서버가 판단).
+  let mine; try{ mine=await rpc('promo_manageable_orgs'); }catch(e){ body.innerHTML=`<div class="err">기관 조회 실패: ${esc(e.message)}</div>`; return; }
+  mine=mine||[];
   if(!mine.length){ body.innerHTML='<div class="err">콘텐츠를 올릴 수 있는 기관이 없습니다.</div>'; return; }
   const org = mine.find(o=>o.id===orgId) || mine.find(o=>o.id===state.profile.org_id) || mine[0];
   let locs=[], items=[];
