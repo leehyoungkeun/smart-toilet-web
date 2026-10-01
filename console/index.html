@@ -1592,7 +1592,8 @@ async function renderPromo(orgId){
           ? `<video src="${promoUrl(m.path)}" muted preload="metadata" style="width:120px;height:68px;object-fit:cover;background:#000;border-radius:6px"></video>`
           : `<img src="${promoUrl(m.path)}" style="width:120px;height:68px;object-fit:cover;background:#000;border-radius:6px" alt="">`}</td>
       <td><input class="ttl" value="${esc(m.title)}" placeholder="제목(선택)" style="width:180px"></td>
-      <td>${m.kind==='video'?'영상 · 끝까지':`사진 · <input type="number" class="dur" value="${m.duration_sec}" min="3" max="120" style="width:56px"> 초`}</td>
+      <td style="white-space:nowrap">${m.kind==='video'?'영상 ':`사진 표시 <input type="number" class="dur" value="${m.duration_sec}" min="3" max="120" style="width:56px"> 초 · `}반복 <input type="number" class="rep" value="${m.repeat_count||1}" min="1" max="10" style="width:48px"> 회${m.kind==='video'?` · <label><input type="checkbox" class="snd" ${m.sound?'checked':''}> 소리</label>`:''}</td>
+      <td style="white-space:nowrap;font-size:13px">시간 <input type="time" class="tf" value="${(m.show_from||'').slice(0,5)}"> ~ <input type="time" class="tt" value="${(m.show_to||'').slice(0,5)}"><br>기간 <input type="date" class="df" value="${m.date_from||''}"> ~ <input type="date" class="dt" value="${m.date_to||''}"></td>
       <td><select class="scope"><option value="" ${!m.location_id?'selected':''}>지자체 전체</option>${locs.map(l=>`<option value="${l.id}" ${m.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td>
       <td class="muted">${fmtMB(m.size_bytes||0)}</td>
       <td><label><input type="checkbox" class="act" ${m.active?'checked':''}> 켬</label></td>
@@ -1601,7 +1602,7 @@ async function renderPromo(orgId){
   body.innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
       <div><h2 style="margin:0">🎬 홍보 콘텐츠 <span class="muted" style="font-weight:400;font-size:14px">태블릿 대기 화면</span></h2>
-        <div class="muted" style="font-size:13px;margin-top:4px">평소에 이 목록을 순서대로 돌리고, 시민이 화면을 터치하면 이용 메뉴로 갑니다. 영상은 소리 없이 재생됩니다.</div></div>
+        <div class="muted" style="font-size:13px;margin-top:4px">평소에 이 목록을 순서대로 돌리고, 시민이 화면을 터치하면 이용 메뉴로 갑니다. 영상은 "소리"를 켜지 않으면 소리 없이 재생됩니다. 시간대는 22:00~06:00처럼 자정을 넘겨도 됩니다.</div></div>
       <div style="display:flex;gap:8px;align-items:center">
         <label class="muted">기관</label>
         <select id="org">${mine.map(o=>`<option value="${o.id}" ${o.id===org.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
@@ -1615,8 +1616,8 @@ async function renderPromo(orgId){
       <div id="umsg" style="flex-basis:100%"></div>
     </div>
     <div class="tscroll"><table>
-      <thead><tr><th>순서</th><th>미리보기</th><th>제목</th><th>종류 · 표시 시간</th><th>보일 곳</th><th>크기</th><th>사용</th><th></th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="8" class="muted" style="text-align:center;padding:30px">올린 콘텐츠가 없습니다. 콘텐츠가 없으면 태블릿은 지금처럼 이용 메뉴를 보여 줍니다.</td></tr>'}</tbody>
+      <thead><tr><th>순서</th><th>미리보기</th><th>제목</th><th>재생</th><th>보일 때 (비우면 항상)</th><th>보일 곳</th><th>크기</th><th>사용</th><th></th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="9" class="muted" style="text-align:center;padding:30px">올린 콘텐츠가 없습니다. 콘텐츠가 없으면 태블릿은 지금처럼 이용 메뉴를 보여 줍니다.</td></tr>'}</tbody>
     </table></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><span class="muted" id="smsg" style="align-self:center"></span><button class="btn" id="save">변경 저장</button></div>
   </div>`;
@@ -1664,6 +1665,11 @@ async function renderPromo(orgId){
       for(let i=0;i<trs.length;i++){ const tr=trs[i]; const dur=tr.querySelector('.dur');
         const patch={ sort_order:i, title:tr.querySelector('.ttl').value.trim(), location_id:tr.querySelector('.scope').value||null, active:tr.querySelector('.act').checked };
         if(dur) patch.duration_sec=Math.min(120,Math.max(3,parseInt(dur.value,10)||8));
+        patch.repeat_count=Math.min(10,Math.max(1,parseInt(tr.querySelector('.rep').value,10)||1));
+        const snd=tr.querySelector('.snd'); if(snd) patch.sound=snd.checked;
+        const v=(c)=>tr.querySelector(c).value||null;
+        patch.show_from=v('.tf'); patch.show_to=v('.tt'); patch.date_from=v('.df'); patch.date_to=v('.dt');
+        if((patch.show_from&&!patch.show_to)||(!patch.show_from&&patch.show_to)) throw new Error('시간대는 시작과 끝을 둘 다 넣거나 둘 다 비우세요.');
         const {error}=await supabase.from('promo_media').update(patch).eq('id',tr.dataset.id); if(error) throw error; }
       smsg.textContent='저장했습니다. 태블릿에는 10분 안에 반영됩니다.'; setTimeout(()=>renderPromo(org.id),900);
     }catch(e){ smsg.textContent=''; alert('저장 실패: '+e.message); }
