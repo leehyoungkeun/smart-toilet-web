@@ -1736,7 +1736,7 @@ function promoEdit(m, locs, onDone){
     <h2 style="margin:0 0 4px">${isV?'🎞 영상':'🖼 사진'} 설정 <span class="muted" style="font-weight:400;font-size:14px">${esc(m.title||'')}</span></h2>
     <div class="fsec">기본</div>
     <div class="grid2">
-      <div><label class="f">제목</label><input id="p_title" value="${esc(m.title||'')}"></div>
+      <div><label class="f">제목</label><input id="p_title" value="${esc(m.title||'')}" style="width:100%;box-sizing:border-box"></div>
       <div><label class="f">보일 곳</label><select id="p_scope"><option value="" ${!m.location_id?'selected':''}>지자체 전체</option>${locs.map(l=>`<option value="${l.id}" ${m.location_id===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></div>
       <div><label class="f">사용</label><label><input type="checkbox" id="p_active" ${m.active?'checked':''}> 태블릿에 보임</label></div>
     </div>
@@ -1751,10 +1751,18 @@ function promoEdit(m, locs, onDone){
       <div><label class="f">전환</label><label><input type="checkbox" id="p_fade" ${m.fade!==false?'checked':''}> 서서히 바뀜</label></div>
       <div><label class="f">화면 맞춤</label><select id="p_fit"><option value="contain" ${(m.fit||'contain')==='contain'?'selected':''}>여백 두고 전체 보임</option><option value="cover" ${m.fit==='cover'?'selected':''}>꽉 채움 (가장자리 잘릴 수 있음)</option></select></div>
     </div>
-    <div class="fsec">자막</div>
-    <div class="grid2">
-      <div style="grid-column:span 2"><label class="f">문구 <span class="muted">(비우면 없음)</span></label><input id="p_cap" value="${esc(m.caption||'')}" placeholder="예: 10월 자라섬 재즈축제"></div>
-      <div><label class="f">크기 · 위치</label><div style="display:flex;gap:8px"><select id="p_capsz"><option value="small" ${m.caption_size==='small'?'selected':''}>작게</option><option value="medium" ${(m.caption_size||'medium')==='medium'?'selected':''}>보통</option><option value="large" ${m.caption_size==='large'?'selected':''}>크게</option></select><select id="p_cappos"><option value="bottom" ${(m.caption_pos||'bottom')==='bottom'?'selected':''}>아래</option><option value="top" ${m.caption_pos==='top'?'selected':''}>위</option></select></div></div>
+    <div class="fsec">자막 <span class="muted" style="font-weight:400;font-size:12.5px">비우면 없음 · 두 줄까지</span></div>
+    <div style="padding:4px 2px">
+      <textarea id="p_cap" rows="2" maxlength="80" placeholder="예: 10월 자라섬 재즈축제&#10;둘째 줄도 됩니다" style="width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid #D6DCEC;border-radius:9px;resize:vertical">${esc(m.caption||'')}</textarea>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        <span class="muted" id="p_capcnt" style="font-size:12px">${(m.caption||'').length} / 80자</span>
+        <span>크기 <select id="p_capsz"><option value="small" ${m.caption_size==='small'?'selected':''}>작게</option><option value="medium" ${(m.caption_size||'medium')==='medium'?'selected':''}>보통</option><option value="large" ${m.caption_size==='large'?'selected':''}>크게</option></select></span>
+        <span>위치 <select id="p_cappos"><option value="bottom" ${(m.caption_pos||'bottom')==='bottom'?'selected':''}>아래</option><option value="top" ${m.caption_pos==='top'?'selected':''}>위</option></select></span>
+      </div>
+      <div id="p_capprev" style="margin-top:10px;background:#000;border-radius:10px;height:150px;position:relative;overflow:hidden">
+        <div id="p_capprevt" style="position:absolute;left:0;right:0;text-align:center;padding:0 24px"></div>
+        <div class="muted" style="position:absolute;right:10px;bottom:6px;font-size:11px;color:#9aa3b5">태블릿에서 보이는 모양</div>
+      </div>
     </div>
     <div class="fsec">보일 때 <span class="muted" style="font-weight:400;font-size:12.5px">비우면 항상</span></div>
     <div class="grid2">
@@ -1767,6 +1775,12 @@ function promoEdit(m, locs, onDone){
   `,'wide');
   const g=(id)=>bd.querySelector('#'+id);
   const setDays=(mask)=>bd.querySelectorAll('.p_day').forEach(c=>{ c.checked=!!(mask&+c.dataset.bit); });
+  // 자막 미리보기: 입력·크기·위치를 바꾸는 대로 태블릿 모양으로 보여 준다(태블릿 글자 24/34/48px 을 150px 높이에 맞춰 축소)
+  const prev=()=>{ const t=g('p_cap').value; g('p_capcnt').textContent=`${t.length} / 80자`;
+    const el=g('p_capprevt'); const sz={small:11,medium:15,large:21}[g('p_capsz').value]||15; const top=g('p_cappos').value==='top';
+    el.style.top=top?'12px':''; el.style.bottom=top?'':'28px';
+    el.innerHTML=t.trim()?`<span style="display:inline-block;color:#fff;font-weight:700;font-size:${sz}px;line-height:1.35;background:rgba(0,0,0,.5);padding:5px 12px;border-radius:8px;white-space:pre-wrap;max-width:90%">${esc(t)}</span>`:'<span style="color:#666;font-size:12px">자막 없음</span>'; };
+  ['p_cap','p_capsz','p_cappos'].forEach(id=>{ g(id).oninput=prev; g(id).onchange=prev; }); prev();
   g('p_dall').onclick=()=>setDays(127); g('p_dwk').onclick=()=>setDays(62); g('p_dwe').onclick=()=>setDays(65);
   g('p_cancel').onclick=()=>bd.remove();
   g('p_save').onclick=async()=>{
