@@ -119,6 +119,9 @@
   .etile .s { font-size:12px; color:#6B7590; } .etile .s b { color:#36405A; font-weight:600; }
   .etile.warn { border-color:#F0D9AF; } .etile.bad { border-color:#F3C2C2; background:#FFF8F8; }
   .envgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; position:relative; }
+  .sbars { padding:6px 2px 2px; } .sbar { display:grid; grid-template-columns:88px 1fr 40px; align-items:center; gap:10px; margin:7px 0; font-size:13px; }
+  .sbar .sl { color:#36405A; font-weight:600; text-align:right; } .sbar .st { height:14px; background:#EEF1F7; border-radius:7px; overflow:hidden; }
+  .sbar .st i { display:block; height:100%; background:#2A78D6; border-radius:7px; } .sbar .sn { color:#6B7590; text-align:right; }
   .ecard { background:#fff; border:1px solid #E5E9F2; border-radius:14px; padding:12px 14px 6px; }
   .ecard .eh { display:flex; align-items:baseline; gap:6px; font-size:14px; color:#22314F; margin-bottom:4px; }
   .ecard .eh .ev { margin-left:auto; font-size:12px; font-variant-numeric:tabular-nums; }
@@ -132,6 +135,8 @@
   @media (max-width:900px){ .etiles { grid-template-columns:repeat(2,1fr); } .envgrid { grid-template-columns:1fr; } }
   .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .ovgrid > .card, .ovgrid > #ovset > .card { height:100%; box-sizing:border-box; }
+  select.cst { font:inherit; font-size:12px; font-weight:700; padding:3px 22px 3px 8px; border-radius:999px; border:1px solid transparent; cursor:pointer; }
+  select.cst.b-b { background:#E8F0FE; color:#1F4FB8; } select.cst.b-a { background:#FFF1D6; color:#8A5A00; } select.cst.b-g { background:#DDF5E6; color:#1E7A3C; }
   .ovgrid .kv { grid-template-columns:118px 1fr; margin-top:14px; }
   .ovgrid .kv > div { padding:10px 0; }
   .ovgrid .cardhead { padding-bottom:10px; border-bottom:2px solid #E8ECF5; }
@@ -494,14 +499,14 @@ const LOG_TABS = [
   // 연락처는 가려서 보여준다(mask_phone). 명단을 통째로 볼 이유가 있는
   // 사람은 없다 — 회신은 시스템이 보낸다.
   { key:'complaints', label:'민원', table:'complaints', ts:'created_at', rpc:'location_complaints',
-    cols:[['reception_no','접수번호'],['category','유형'],['detail','내용'],['location_label','위치'],
-          ['contact_masked','연락처'],['status','상태'],['created_at','접수','dt']] },
+    cols:[['reception_no','접수번호'],['category','유형'],['detail','내용'],['location_label','위치'],['repeat_count','반복'],
+          ['contact_masked','연락처'],['status','상태'],['status_note','처리 메모'],['created_at','접수','dt']] },
   { key:'inspections', label:'점검', table:'inspections', ts:'inspected_at',
     cols:[['inspected_at','시각','dt'],['category','구분'],['title','항목'],['inspector','담당자'],['status','상태']] },
   { key:'safety', label:'안심', table:'safety_events', ts:'occurred_at',
     cols:[['occurred_at','시각','dt'],['type','유형'],['title','제목'],['detail','상세'],['status','상태']] },
   { key:'satisfaction', label:'만족도', table:'satisfaction_responses', ts:'created_at',
-    cols:[['created_at','시각','dt'],['rating','평점'],['comment','의견']] },
+    cols:[['created_at','시각','dt'],['rating','평점'],['reason','아쉬운 점'],['source','어디서'],['comment','의견']] },
   { key:'env', label:'환경', table:'env_readings', ts:'recorded_at', env:true,
     cols:[['recorded_at','시각','dt'],['temperature','온도'],['humidity','습도'],['ammonia_ppm','암모니아'],['pm25','PM2.5']] },
   // 기기 이벤트: 보드가 왜 다시 켜졌는지(board_reset) 를 한 건씩. 하트비트의 누계는 "몇 번" 이고, 여기는 "언제·얼마나 자주".
@@ -576,6 +581,7 @@ async function renderTab(l, admin){
   // 서로를 기다리지 않게). 표는 서버 페이지네이션 — 예전엔 1000행 상한에 3일치부터 잘렸다.
   if(tab.env){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="envviz"></div>'); renderEnvViz(l); }
   if(tab.key==='dispense'){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="dispviz"></div>'); renderDispenseViz(l); }
+  if(tab.key==='satisfaction'){ document.getElementById('logbody').insertAdjacentHTML('beforebegin','<div id="satviz"></div>'); renderSatisfactionViz(l); }
   await refreshLog(tab, l);
 }
 
@@ -592,6 +598,12 @@ async function refreshLog(tab, l){
   nb.querySelector('#lnext').onclick=()=>go(Math.min(pages,state.lpage+1));
   nb.querySelector('#lps').onchange=e=>{ state.lps=+e.target.value; go(1); };
   nb.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>go(+b.dataset.p));
+  // 민원 상태 바꾸기 — 완료로 바꿀 때는 처리 메모를 한 줄 받는다(뒤에 시민 회신 본문이 된다). 실패하면 원래 값으로 되돌린다.
+  nb.querySelectorAll('select[data-cst]').forEach(sel=>{ const prev=sel.value; sel.onchange=async()=>{
+    let note=null;
+    if(sel.value==='done'){ note=prompt('처리 내용을 한 줄로 적어 주세요 (시민 회신에 쓰입니다)',''); if(note===null){ sel.value=prev; return; } }
+    try{ await rpc('console_set_complaint_status',{p_id:+sel.dataset.cst,p_status:sel.value,p_note:note}); refreshLog(tab,l); }
+    catch(e){ alert('상태 변경 실패: '+e.message); sel.value=prev; } }; });
   const csv=document.getElementById('csv'); if(csv) csv.onclick=()=>exportCsvAll(tab,l);
 }
 
@@ -671,10 +683,22 @@ function fmtCell(tabKey, field, v){
     return esc(Object.entries(d).map(([k,x])=>`${k}=${x}`).join(', '))||'<span class="muted">-</span>'; }
   if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
   if(tabKey==='dispense'&&field==='method') return badge(String(v).toUpperCase(),'b-b');
+  if(tabKey==='satisfaction'&&field==='source') return esc(SAT_SRC[v]||v);
+  if(tabKey==='satisfaction'&&field==='reason') return badge(v,'b-a');
   if(tabKey==='satisfaction'&&field==='rating'){ const n=+v; return `<span class="stars">${'★'.repeat(n)}<span class="star-off">${'★'.repeat(5-n)}</span></span> <span class="muted">${n}.0</span>`; }
   return esc(String(v));
 }
+// 민원 탭은 줄 안에서 상태를 바꾼다(2026-10-02). 그전엔 콘솔에서 상태를 바꿀 길이 없어 '접수' 로만 쌓였다.
+const CST=[['received','접수'],['in_progress','처리중'],['done','완료']];
 function cellHtml(tab,c,r){ if(c[2]==='dt'){ const v=r[c[0]]; return v?`<span class="nowrap">${esc(fmtDt(v))}</span>`:'<span class="muted">-</span>'; }
+  if(tab.key==='complaints'){
+    if(c[0]==='reception_no') return `${esc(r.reception_no||'')}${r.duplicate_of_no?` <span class="muted" title="30분 안에 같은 내용이 다시 접수돼 원본에 묶였습니다">↳ ${esc(r.duplicate_of_no)} 와 같은 민원</span>`:''}`;
+    if(c[0]==='repeat_count') return r.duplicate_of_no?'<span class="muted">-</span>':((+r.repeat_count||1)>1?badge(`${r.repeat_count}회`,'b-a'):'<span class="muted">1회</span>');
+    if(c[0]==='status'){ if(r.duplicate_of_no) return fmtCell(tab.key,'status',r.status);
+      const cls={received:'b-b',in_progress:'b-a',done:'b-g'}[r.status]||'';
+      return `<select class="cst ${cls}" data-cst="${r.id}" title="상태를 바꾸면 바로 저장됩니다. 묶인 중복 민원도 함께 바뀝니다">${CST.map(([v,l])=>`<option value="${v}" ${r.status===v?'selected':''}>${l}</option>`).join('')}</select>`; }
+    if(c[0]==='status_note') return r.status_note?`<span title="${esc(r.status_changed_at?fmtDt(r.status_changed_at):'')}">${esc(r.status_note)}</span>`:'<span class="muted">-</span>';
+  }
   if(c[2]==='claim'){ const v=r[c[0]]; return v?`<code title="폰 브라우저가 만든 난수 ID — 사람이 아니라 같은 폰인지만 구분">${esc(String(v).slice(0,8))}…</code>`:'<span class="muted">-</span>'; }
   return fmtCell(tab.key,c[0],r[c[0]]); }
 function cellText(tab,c,r){ const v=r[c[0]]; if(v==null||v==='') return ''; if(c[2]==='dt') return fmtDt(v); if(c[2]==='claim') return String(v).slice(0,8); return fmtCell(tab.key,c[0],v).replace(/<[^>]*>/g,'').trim(); }
@@ -714,13 +738,28 @@ async function exportCsvAll(tab,l){
 // ── 환경 탭: 지표 타일 + 그래프 ──────────────────────────────
 // 기준값(참고). 공중화장실 전용 기준이 없어 실내공기질 유지·권고 기준과 쾌적 범위를 썼다. 지자체가 다른
 // 값을 쓰면 여기만 고친다. band = 허용 범위(그래프의 연한 띠), bad = 그 밖에서도 '나쁨' 으로 격상하는 값.
+// 기본값은 키오스크 lib/comfort.js 와 같다(공중화장실 기준). 플랫폼 설정(comfort_*)이 있으면 그 값으로 덮어쓴다 — loadComfortBands().
 const ENV_METRICS=[
-  { key:'temperature', s:'temp', label:'온도',   unit:'°C',    band:[18,28],  digits:1 },
-  { key:'humidity',    s:'hum',  label:'습도',   unit:'%',     band:[40,70],  digits:1 },
-  { key:'ammonia_ppm', s:'nh3',  label:'암모니아', unit:'ppm', band:[0,1],  bad:5,  digits:3 },
-  { key:'pm25',        s:'pm',   label:'PM2.5',  unit:'µg/m³', band:[0,35], bad:75, digits:1 },
+  { key:'temperature', s:'temp', label:'온도',   unit:'°C',    band:[14,29], bad:33, badLow:8, digits:1 },
+  { key:'humidity',    s:'hum',  label:'습도',   unit:'%',     band:[0,70],  bad:85, digits:1 },
+  { key:'ammonia_ppm', s:'nh3',  label:'암모니아', unit:'ppm', band:[0,0.5], bad:2,  digits:3 },
+  { key:'pm25',        s:'pm',   label:'PM2.5',  unit:'µg/m³', band:[0,35],  bad:75, digits:1 },
 ];
-function envGrade(m,v){ if(v==null) return null; if(m.bad!=null && v>=m.bad) return 'bad'; if(v<m.band[0]||v>m.band[1]) return 'warn'; return 'ok'; }
+function envGrade(m,v){ if(v==null) return null; if((m.bad!=null && v>=m.bad)||(m.badLow!=null && v<=m.badLow)) return 'bad'; if(v<m.band[0]||v>m.band[1]) return 'warn'; return 'ok'; }
+let _bandsLoaded=false;
+async function loadComfortBands(){
+  if(_bandsLoaded) return; _bandsLoaded=true;
+  try{
+    const d=await rpc('get_platform_settings');
+    const kv={}; (Array.isArray(d)?d:Object.entries(d||{}).map(([key,value])=>({key,value}))).forEach(r=>{ if(r&&r.key!=null) kv[r.key]=r.value; });
+    const n=k=>{ const v=kv[k]; const x=typeof v==='string'?parseFloat(v):+v; return Number.isFinite(x)?x:null; };
+    const set=(key,fn)=>{ const m=ENV_METRICS.find(x=>x.key===key); if(m) fn(m); };
+    set('temperature',m=>{ const fl=n('comfort_temp_fair_low'),fh=n('comfort_temp_fair_high'),bh=n('comfort_temp_bad_high'),bl=n('comfort_temp_bad_low'); if(fl!=null&&fh!=null) m.band=[fl,fh]; if(bh!=null) m.bad=bh; if(bl!=null) m.badLow=bl; });
+    set('humidity',m=>{ const f=n('comfort_hum_fair'),b=n('comfort_hum_bad'); if(f!=null) m.band=[0,f]; if(b!=null) m.bad=b; });
+    set('ammonia_ppm',m=>{ const f=n('comfort_ammonia_fair'),b=n('comfort_ammonia_bad'); if(f!=null) m.band=[0,f]; if(b!=null) m.bad=b; });
+    set('pm25',m=>{ const f=n('comfort_pm25_fair'),b=n('comfort_pm25_bad'); if(f!=null) m.band=[0,f]; if(b!=null) m.bad=b; });
+  }catch(e){ /* 설정을 못 읽으면 기본값(앱과 같음) 그대로 */ }
+}
 // ── 지급 탭: 요약 타일 ────────────────────────────────────────
 // 개인정보 없이 볼 수 있는 것만: 지급 건수, 고유 폰(claimant_id — 폰 브라우저 난수, 사람 수의 근사치),
 // 전환율(QR 스캔 세션 중 실제 지급까지 간 비율), 만료·취소. 전환율이 낮으면 "찍었는데 못 받아간 시민" 이
@@ -753,8 +792,49 @@ async function renderDispenseViz(l){
     <div class="muted" style="font-size:12px;margin:-4px 2px 14px">수령 폰 = 시민 폰 브라우저가 만든 난수 ID. 이름·연락처는 저장하지 않는다(무저장 설계). 폰을 바꾸면 새 폰으로 센다.</div>`;
   }catch(e){ box.innerHTML=`<div class="err">지급 요약 조회 실패: ${esc(e.message)}</div>`; }
 }
+const SAT_SRC={menu:'메뉴에서',after_dispense:'배출 뒤',after_complaint:'민원 뒤'};
+// 만족도 요약(2026-10-02): 응답 수·평균·불만 비율 타일, 주간 평균 추이(선 하나), 불만 이유 막대(한 색). 기간은 표와 같은 기간.
+async function renderSatisfactionViz(l){
+  const box=document.getElementById('satviz'); if(!box) return;
+  const {a,b}=logBounds();
+  box.innerHTML='<div class="muted" style="padding:10px 2px">요약 불러오는 중…</div>';
+  let d;
+  try{ d=await rpc('location_satisfaction_stats',{p_location:l.id,p_from:a?a.toISOString():null,p_to:b?b.toISOString():null}); }
+  catch(e){ box.innerHTML=`<div class="err">만족도 요약 조회 실패: ${esc(e.message)}${/location_satisfaction_stats/.test(e.message)?' — 만족도 마이그레이션(20261002160000)이 아직 적용되지 않았습니다':''}</div>`; return; }
+  const total=+d.total||0, avg=d.avg==null?null:+d.avg, low=+d.low||0;
+  const lowPct=total?Math.round(low/total*100):null;
+  const tile=(lab,v,sub,tone='')=>`<div class="etile ${tone}"><div class="l">${lab}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  const srcs=(d.sources||[]).map(x=>`${SAT_SRC[x.source]||x.source} ${(+x.n).toLocaleString()}`).join(' · ')||'-';
+  const tiles=`<div class="etiles">
+    ${tile('응답', `${total.toLocaleString()}<span class="muted" style="font-size:14px;font-weight:600"> 건</span>`, srcs)}
+    ${tile('평균 점수', avg==null?'-':`${avg.toFixed(1)}<span class="muted" style="font-size:14px;font-weight:600"> / 5</span>`, '1 매우 불만 ~ 5 매우 만족')}
+    ${tile('불만 비율', lowPct==null?'-':`${lowPct}<span class="muted" style="font-size:14px;font-weight:600"> %</span>`, `1·2점 ${low.toLocaleString()}건`, lowPct==null?'':(lowPct>=30?'bad':lowPct>=15?'warn':''))}
+    ${tile('가장 많은 아쉬운 점', (d.reasons||[])[0]?esc(d.reasons[0].reason):'-', (d.reasons||[])[0]?`${d.reasons[0].n}건 · 불만·보통 응답 중`:'불만 응답이 없습니다')}
+  </div>`;
+  // 주간 평균 추이 — 점수 1~5 한 축, 응답 수는 점 크기가 아니라 아래 눈금 글자로.
+  const W=600,H=170,P={l:36,r:12,t:12,b:26}, x0=P.l,x1=W-P.r,y0=P.t,y1=H-P.b;
+  const wk=(d.weeks||[]).map(w=>({t:+new Date(w.wk),n:+w.n,avg:+w.avg,low:+w.low_n}));
+  let chart;
+  if(wk.length){
+    const xs=i=>wk.length===1?(x0+x1)/2:x0+(x1-x0)*i/(wk.length-1), ys=v=>y1-(y1-y0)*((v-1)/4);
+    const grid=[1,2,3,4,5].map(v=>`<line x1="${x0}" x2="${x1}" y1="${ys(v).toFixed(1)}" y2="${ys(v).toFixed(1)}" stroke="#E8ECF4"/><text x="${x0-6}" y="${(ys(v)+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#6B7590">${v}</text>`).join('');
+    const line=`<path d="M${wk.map((w,i)=>`${xs(i).toFixed(1)},${ys(w.avg).toFixed(1)}`).join('L')}" fill="none" stroke="#2A78D6" stroke-width="2" stroke-linejoin="round"/>`;
+    const dots=wk.map((w,i)=>`<circle cx="${xs(i).toFixed(1)}" cy="${ys(w.avg).toFixed(1)}" r="4" fill="#2A78D6" stroke="#fff" stroke-width="2"><title>${new Date(w.t).toLocaleDateString('ko-KR')} 주 · 평균 ${w.avg.toFixed(2)} · ${w.n}건 · 불만 ${w.low}건</title></circle>`).join('');
+    const xt=wk.map((w,i)=>{ const dd=new Date(w.t); return `<text x="${xs(i).toFixed(1)}" y="${y1+16}" text-anchor="middle" font-size="11" fill="#6B7590">${dd.getMonth()+1}/${dd.getDate()} <tspan fill="#9AA3B5">(${w.n})</tspan></text>`; }).join('');
+    chart=`<div class="ecard"><div class="eh"><b>주간 평균 점수</b> <span class="muted">주 시작일 (응답 수)</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="esvg" style="height:170px">${grid}<line x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}" stroke="#C9D0DE"/>${xt}${line}${dots}</svg></div>`;
+  } else chart=`<div class="ecard"><div class="eh"><b>주간 평균 점수</b></div><div class="muted" style="padding:40px 0;text-align:center;font-size:12px">이 기간에 응답이 없습니다</div></div>`;
+  // 불만 이유 — 가로 막대, 한 색, 끝에 건수.
+  const rs=d.reasons||[]; const mx=rs.length?Math.max(...rs.map(r=>+r.n)):0;
+  const bars=rs.length?rs.map(r=>`<div class="sbar"><span class="sl">${esc(r.reason)}</span><span class="st"><i style="width:${Math.max(3,Math.round(+r.n/mx*100))}%"></i></span><span class="sn">${(+r.n).toLocaleString()}</span></div>`).join('')
+    :'<div class="muted" style="padding:40px 0;text-align:center;font-size:12px">불만·보통 응답에서 고른 이유가 아직 없습니다</div>';
+  const reasons=`<div class="ecard"><div class="eh"><b>아쉬운 점</b> <span class="muted">1~3점 응답이 고른 이유</span></div><div class="sbars">${bars}</div></div>`;
+  box.innerHTML=`${tiles}<div class="envgrid">${chart}${reasons}</div>
+    <div class="muted" style="font-size:12px;margin:6px 2px 14px">배출·민원이 끝난 화면에서 한 번 묻는 응답(배출 뒤·민원 뒤)이 메뉴 응답보다 많고 덜 치우친다. 불만 비율 15% 이상 주의, 30% 이상 나쁨.</div>`;
+}
 async function renderEnvViz(l){
   const box=document.getElementById('envviz'); if(!box) return;
+  await loadComfortBands();
   const {a,b}=logBounds(); const from=a||new Date(Date.now()-3*86400000), to=b||new Date();
   // 구간(분): 기간이 얼마든 300점 안팎. 5분 단위로 올림.
   const spanMin=(to-from)/60000; const bucket=Math.max(5, Math.ceil(spanMin/300/5)*5);
@@ -780,7 +860,7 @@ async function renderEnvViz(l){
   const charts=ENV_METRICS.map(m=>envChart(m,series,from,to)).join('');
   box.innerHTML=`<div class="etiles">${tiles}</div>
     <div class="envgrid">${charts}</div>
-    <div class="muted" style="font-size:12px;margin:6px 2px 14px">${bucket}분 구간 평균선 · 옅은 띠는 그 구간의 최소~최대 · 초록 띠는 허용 범위 · 회색은 밤(22~06시)${latest?` · 현재값 ${esc(fmtDt(latest.recorded_at))} 측정`:''}</div>`;
+    <div class="muted" style="font-size:12px;margin:6px 2px 14px">${bucket}분 구간 평균선 · 옅은 띠는 그 구간의 최소~최대 · 초록 띠는 허용 범위(키오스크 "지금 쾌적" 판정과 같은 기준, 플랫폼 설정 쾌적도) · 회색은 밤(22~06시)${latest?` · 현재값 ${esc(fmtDt(latest.recorded_at))} 측정`:''}</div>`;
   wireEnvHover(box, series, from, to);
 }
 // 지표 하나의 라인 차트(인라인 SVG, 라이브러리 없음 — 폐쇄망에서도 그대로). viewBox 로 그리고 CSS 로 늘린다.
