@@ -675,7 +675,12 @@ const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시
   // 2.1.30: 태블릿→보드 명령이 끊긴 때와 되살아난 때만 남는다(예전 link_reset 은 4분마다 쌓였다).
   link_down:['보드 명령 불통','b-r'], link_up:['보드 명령 복구','b-g'],
   // 2.1.33: 관리자 화면의 배출 테스트(단발·계속) 결과. detail = {mode, seq, run_id, result, ms} — ms 가 핵심(정상 6.3초, 조기 정지 1초대).
-  dispense_test:['배출 테스트','b-b'] };
+  dispense_test:['배출 테스트','b-b'],
+  // 2.1.51: 인증 QR 거부(사유·발급 번호). 호퍼 추정기 기록은 hopper 번호가 붙는다.
+  voucher_reject:['인증 QR 거부','b-a'], hopper_switch_ignored:['비움 스위치 무시','b-x'], hopper_ref_suspect:['거리 센서 의심','b-a'],
+  hopper_mismatch:['남은 양 불일치','b-a'], hopper_empty:['통 비움 확정','b-x'], hopper_jam:['배출 안 됨(거리 그대로)','b-a'], hopper_learn_rejected:['곡선 학습 보류','b-x'] };
+const VREJECT_KO = { invalid:'미등록 QR', not_voucher:'인증 QR 아님', suspended:'정지된 QR', revoked:'폐기된 QR', not_yet:'기간 전', expired:'기간 지남',
+  wrong_area:'다른 지역 QR', limit_reached:'횟수 소진', monthly_cap:'월 총량 소진', out_of_stock:'재고 없음', voucher_disabled:'인증 QR 미사용 화장실', network:'통신 오류', unknown:'알 수 없음' };
 // 배출 고장 사유. stop_stuck = 리미트스위치가 눌린 채 안 떨어짐(캠 정지 위치·스위치 고장·배선 단락).
 const FAULT_KO = { stop_stuck:'스위치 물림', jam:'회전 안 됨(잼)', unstick_fail:'자동해소 실패', locked:'고장 잠금 상태',
   timeout:'응답 없음', not_connected:'보드 미연결', send_failed:'전송 실패', busy:'동작 중', ctrl_unverified:'제어핀 미확정',
@@ -695,6 +700,7 @@ function fmtCell(tabKey, field, v){
     if(d.mode&&d.result){ const ok=d.result==='ok'; const r=ok?'성공':(FAULT_KO[d.result]||d.result);
       return `${d.mode==='loop'?`연속 ${d.seq}회차`:'단발'} · ${ok?badge('성공','b-g'):badge(esc(r),'b-a')}${d.ms!=null?` <span class="muted">${(d.ms/1000).toFixed(1)}초</span>`:''}`; }
     if(d.result) return esc(d.result==='ok'?'성공':d.result);
+    if(d.reason&&VREJECT_KO[d.reason]) return `${badge(VREJECT_KO[d.reason],'b-a')}${d.serial?` <b style="font-family:Consolas,monospace">${esc(d.serial)}</b>`:''}`;
     return esc(Object.entries(d).map(([k,x])=>`${k}=${x}`).join(', '))||'<span class="muted">-</span>'; }
   if(tabKey==='inspections'&&field==='category') return esc(CAT_KO[v]||v);
   if(tabKey==='dispense'&&field==='method') return badge(String(v).toUpperCase(),'b-b');
