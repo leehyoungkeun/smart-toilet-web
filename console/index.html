@@ -1394,7 +1394,7 @@ const XL_EXAMPLE=(()=>{
     m_toilet:4, m_urinal:3, f_toilet:6, accessible:1,
     'am:diaper':'Y','am:powder':'Y','sen:temperature':'Y','sen:humidity':'Y',
     'fea:sound_detection':'Y','fea:dispenser':'Y',
-    stock:20, capacity:30, alert_low_pct:20,
+    stock:20, capacity:50, alert_low_pct:20,
     limit_period:'일', limit_count:1, limit_all:'Y', device_label:'입구 키오스크' };
   return XL_COLS.map(([k])=>v[k]!==undefined?v[k]:(k.includes(':')?'N':''));
 })();
@@ -2362,7 +2362,7 @@ function renderAdd(){
       <div class="fsec">재고</div>
       <div class="grid2">
         <div><label class="f">초기 재고</label><input id="stock" type="number" value="20"/></div>
-        <div><label class="f">최대 용량</label><input id="cap" type="number" value="30"/></div>
+        <div><label class="f">최대 용량</label><input id="cap" type="number" value="50"/></div>
         <div><label class="f">부족 알림 임계값 (%)</label><input id="lowpct" type="number" value="20" min="0" max="100"/></div>
       </div>
       <div id="msg" style="margin:12px 0"></div>
@@ -2397,7 +2397,7 @@ function renderAdd(){
       try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,
           p_device_label:q('dlabel').value.trim()||null,
           p_stock:parseInt(q('stock').value||'0',10),
-          p_capacity:parseInt(q('cap').value||'30',10),
+          p_capacity:parseInt(q('cap').value||'50',10),
           p_sensors:sensors, p_features:features, p_info:info, p_address:addr,
           p_alert_low_pct:parseInt(q('lowpct').value||'20',10)});
         // 등록 직후 관리자 PIN 을 바로 발급한다(트리거의 초기 1234 를 그대로 두지 않게). 이 화면에만 한 번 보인다.
