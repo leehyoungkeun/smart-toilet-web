@@ -477,6 +477,17 @@ function renderTable(){
 
 function modalEl(html,cls=''){ const bd=document.createElement('div'); bd.className='backdrop'; bd.innerHTML=`<div class="modal ${cls}">${html}</div>`;
   bd.onclick=e=>{ if(e.target===bd) bd.remove(); }; document.body.appendChild(bd); return bd; }
+// 저장이 끝나도 창을 바로 닫지 않는다(2026-10-22 사용자 지적). 창이 소리 없이 사라지면 저장된 건지
+// 거부된 건지 알 수 없다 — 실제로 거부 문구를 못 보고 "저장했는데 안 바뀐다" 가 됐다.
+// 성공하면 "저장되었습니다" 를 보이고 저장 버튼을 잠그고 취소를 닫기로 바꾼다. 뒤 화면(목록)은 바로 갱신한다.
+function markSaved(bd, msgSel, after, text){
+  const msg=bd.querySelector(msgSel); if(msg) msg.innerHTML=`<span class="ok" style="font-weight:700">✓ ${esc(text||'저장되었습니다')}</span>`;
+  const sv=bd.querySelector('[data-save]'); if(sv){ sv.disabled=true; sv.style.opacity='.45'; sv.style.cursor='default'; }
+  bd.querySelectorAll('[data-del],[data-pw]').forEach(b=>{ b.style.display='none'; });
+  const x=bd.querySelector('[data-x]'); if(x){ x.textContent='닫기'; x.classList.remove('line'); }
+  bd.onclick=null;   // 바깥을 눌러도 안 닫힘 — 닫기 버튼으로만
+  if(after){ try{ after(); }catch(e){} }
+}
 
 // ── 화장실 상세 (전체화면 · 개요 + 로그 탭 + CSV) ──
 // 탭 아이콘. 외부 아이콘 폰트를 쓰면 폐쇄망에서 네모가 뜬다 — 경로만 담아
@@ -1139,7 +1150,7 @@ function openEdit(l){
       // 이용 안내는 불러오기가 끝난 뒤에만 저장한다. 아직 그려지지 않았는데
       // 저장하면 빈 값으로 덮어써 버린다.
       if(bd.querySelector('#m_addr')) await rpc('admin_set_info',{p_location_id:l.id,p_info:readInfo(bd,'m')});
-      bd.remove(); renderDashboard();
+      markSaved(bd,'#e_msg',renderDashboard,'저장되었습니다. 태블릿은 앱을 다시 시작할 때 새 설정을 읽습니다');
     }catch(e){ q('#e_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
 }
@@ -1563,7 +1574,7 @@ function editTarget(t){
         p_events:events, p_active:q('#t_active').checked,
         p_org_code: s==='org'?pickedOrg(bd,'t'):null,
         p_location_id: s==='loc'?q('#t_loc').value:null });
-      bd.remove(); renderTargets();
+      markSaved(bd,'#t_msg',renderTargets);
     }catch(e){ q('#t_msg').innerHTML=`<div class="err">저장 실패: ${esc(e.message)}</div>`; }
   };
 }
@@ -1665,7 +1676,7 @@ function editOperator(o){
       }else{
         await rpc('admin_update_operator',{p_user:o.id,p_role:role,p_org_code:org_code,p_full_name:full_name});
       }
-      bd.remove(); renderOperators();
+      markSaved(bd,'#o_msg',renderOperators,isNew?'추가되었습니다':'저장되었습니다');
     }catch(e){ msg((isNew?'추가':'저장')+' 실패: '+e.message); }
   };
   const del=bd.querySelector('[data-del]');
@@ -1814,7 +1825,7 @@ function voucherBatchForm(org,locs,onDone){
         p_location:scope==='location'?q('#b_loc').value:null,
         p_limit_count:parseInt(q('#b_count').value||'1',10), p_limit_period:q('#b_period').value,
         p_monthly_cap:cap?parseInt(cap,10):null, p_valid_from:from, p_note:q('#b_note').value.trim()||null });
-      bd.remove(); onDone();
+      markSaved(bd,'#e_msg',onDone,'만들어졌습니다. 목록에서 "발급" 을 누르면 QR 을 만듭니다');
     }catch(e){ err('만들기 실패: '+e.message); }
   };
 }
@@ -1827,7 +1838,7 @@ function voucherIssue(org,b,onDone){
       <div><label class="f">카드 크기</label><select id="v_size" style="width:100%"><option value="card">명함형 · A4 한 장에 10장</option><option value="big">큰 카드 · A4 한 장에 4장</option></select></div>
     </div>
     <div id="v_msg" style="margin:10px 0"></div>
-    <div style="display:flex;gap:8px"><button class="btn" id="go">발급하고 인쇄 창 열기</button><button class="btn line" data-x>취소</button></div>`);
+    <div style="display:flex;gap:8px"><button class="btn" id="go" data-save>발급하고 인쇄 창 열기</button><button class="btn line" data-x>취소</button></div>`);
   const q=s=>bd.querySelector(s);
   q('[data-x]').onclick=()=>bd.remove();
   q('#go').onclick=async()=>{
@@ -1836,7 +1847,8 @@ function voucherIssue(org,b,onDone){
     const w=window.open('','_blank'); if(!w){ msg.innerHTML='<div class="err">인쇄 창이 막혔습니다. 브라우저의 팝업 차단을 풀고 다시 누르세요.</div>'; return; }
     w.document.write('<p style="font-family:sans-serif">발급 중…</p>');
     q('#go').disabled=true;
-    try{ const list=await rpc('issue_vouchers',{p_batch:b.id,p_n:n}); writeVoucherPrint(w,org,b,list||[],q('#v_size').value); bd.remove(); onDone(); }
+    try{ const list=await rpc('issue_vouchers',{p_batch:b.id,p_n:n}); writeVoucherPrint(w,org,b,list||[],q('#v_size').value);
+         markSaved(bd,'#v_msg',onDone,`${(list||[]).length}장 발급되었습니다 — 인쇄 창을 확인하세요`); }
     catch(e){ w.close(); q('#go').disabled=false; msg.innerHTML=`<div class="err">발급 실패: ${esc(e.message)}</div>`; }
   };
 }
@@ -2086,7 +2098,7 @@ function promoEdit(m, locs, onDone){
       <div><label class="f">요일</label><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${DAY_KO.map((k,i)=>`<label><input type="checkbox" class="p_day" data-bit="${1<<i}" ${(days&(1<<i))?'checked':''}>${k}</label>`).join('')}
         <button type="button" class="btn sm line" id="p_dall">매일</button><button type="button" class="btn sm line" id="p_dwk">평일</button><button type="button" class="btn sm line" id="p_dwe">주말</button></div></div>
     </div>
-    <div class="mfoot"><button class="btn" id="p_save">저장</button><button class="btn line" id="p_cancel">닫기</button><span class="muted" id="e_msg"></span></div>
+    <div class="mfoot"><button class="btn" id="p_save" data-save>저장</button><button class="btn line" id="p_cancel" data-x>닫기</button><span class="muted" id="e_msg"></span></div>
   `,'wide');
   const g=(id)=>bd.querySelector('#'+id);
   const setDays=(mask)=>bd.querySelectorAll('.p_day').forEach(c=>{ c.checked=!!(mask&+c.dataset.bit); });
@@ -2114,7 +2126,7 @@ function promoEdit(m, locs, onDone){
       if((patch.show_from&&!patch.show_to)||(!patch.show_from&&patch.show_to)) throw new Error('시간대는 시작과 끝을 둘 다 넣거나 둘 다 비우세요.');
       if(patch.days===0) throw new Error('요일을 하나 이상 고르세요.');
       const {error}=await supabase.from('promo_media').update(patch).eq('id',m.id); if(error) throw error;
-      bd.remove(); onDone();
+      markSaved(bd,'#e_msg',onDone,'저장되었습니다. 태블릿에 곧 반영됩니다');
     }catch(e){ msg.textContent='저장 실패: '+e.message; }
   };
 }
