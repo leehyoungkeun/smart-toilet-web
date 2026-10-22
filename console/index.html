@@ -193,6 +193,8 @@
 <!-- 엑셀 읽기·쓰기 (SheetJS, Apache-2.0). 폐쇄망 대비로 CDN 대신 내장한다.
      구형 xls/ods 를 뺀 판이라 245KB — .xlsx 만 다루면 충분하다. -->
 <script src="./xlsx.js"></script>
+<!-- 인증 QR 인쇄용 QR 생성 (qrcode-generator 1.4.4, Kazuhiko Arase, MIT). 같은 이유로 내장. 전역 qrcode(). -->
+<script src="./qrcode.js"></script>
 <script type="module">
 import { createClient } from './supabase.js';
 const SUPABASE_URL='https://jrcvrlyvkdoxtjlhmapm.supabase.co';
@@ -447,6 +449,7 @@ function renderTable(){
         ${state.role==='platform_admin'?'<button class="btn sm line" id="operators">👤 운영자</button>':''}
         ${canAdd()?'<button class="btn sm line" id="targets">🔔 알림 수신자</button>':''}
         ${state.role?'<button class="btn sm line" id="promo">🎬 홍보 콘텐츠</button>':''}
+        ${canAdd()?'<button class="btn sm line" id="vouchers">🎫 인증 QR</button>':''}
         ${canAdd()?'<button class="btn sm" id="add">＋ 화장실 등록</button>':''}
       </div></div>
     <div class="tscroll"><table>
@@ -464,6 +467,7 @@ function renderTable(){
   const a=t.querySelector('#add'); if(a) a.onclick=renderAdd;
   const g=t.querySelector('#targets'); if(g) g.onclick=renderTargets;
   const pr=t.querySelector('#promo'); if(pr) pr.onclick=()=>renderPromo();
+  const vc=t.querySelector('#vouchers'); if(vc) vc.onclick=()=>renderVouchers();
   const op=t.querySelector('#operators'); if(op) op.onclick=renderOperators;
   const stg=t.querySelector('#settings'); if(stg) stg.onclick=()=>renderSettings('global');
   t.querySelector('#prev').onclick=()=>{ if(state.page>1){state.page--;renderTable();} };
@@ -773,7 +777,8 @@ async function renderDispenseViz(l){
     // 고유 폰: claimant_id 만 1000행씩 받아 센다(화장실 하나의 기간 지급이라 크지 않다).
     const ids=new Set(); let total=0;
     for(let off=0; off<20000; off+=1000){
-      let q=supabase.from('dispense_logs').select('claimant_id').eq('location_id',l.id).order('dispensed_at',{ascending:false});
+      // 배출 실패로 원복된 행(failed)은 지급이 아니다.
+      let q=supabase.from('dispense_logs').select('claimant_id').eq('location_id',l.id).eq('status','completed').order('dispensed_at',{ascending:false});
       if(a) q=q.gte('dispensed_at',a.toISOString()); if(b) q=q.lte('dispensed_at',b.toISOString());
       const {data,error}=await q.range(off,off+999); if(error) throw new Error(error.message);
       (data||[]).forEach(r=>{ total++; if(r.claimant_id) ids.add(r.claimant_id); });
@@ -1024,7 +1029,7 @@ function settingsHtml(l,d){
       ${row('설치 센서',on(se,SENSOR_KEYS))}
       ${row('안전시설',on(fe,FEATURE_KEYS))}
       ${row('생리용품',fe.dispenser
-        ? `${esc(ds.method||'-')} · <b>${esc(limitText(ds))}</b> · ${esc(LIMIT_SCOPE[ds.limit_scope||'all'])}`
+        ? `${esc(DISPENSE_METHOD[methodOf(ds)])}${methodOf(ds)==='voucher'?'':` · <b>${esc(limitText(ds))}</b> · ${esc(LIMIT_SCOPE[ds.limit_scope||'all'])}`}${ds.label?`<div class="muted" style="font-size:12px">안내: ${esc(ds.label)}</div>`:''}`
         : '<span class="muted">배출기 미설치</span>')}
       ${row('재고 부족 알림',(d&&d.alert_low_pct!=null)?`용량의 ${d.alert_low_pct}% 이하`:'-')}
     </div></div>`;
@@ -1108,11 +1113,12 @@ function openEdit(l){
       bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; });
       const box=bd.querySelector('#e_info');
       if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{},l.address);
-        box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&el.id!=='m_lcount') el.style.width='100%'; });
+        box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&!['m_lcount','m_gap','m_bw','m_bc'].includes(el.id)) el.style.width='100%'; });
         wireLimitHint(box,'m'); } })
     .catch(()=>{});
   bd.querySelector('[data-save]').onclick=async()=>{
     const q=s=>bd.querySelector(s);
+    const me=methodErrorIn(bd,'m'); if(me){ q('#e_msg').innerHTML=`<div class="err">${esc(me)}</div>`; return; }
     try{
       // 지역은 기관 코드로만 보낸다. 시도·시군구는 서버가 계층에서 채운다.
       await rpc('admin_update_location',{ p_id:l.id,
@@ -1188,6 +1194,16 @@ const AMENITIES=[['diaper','기저귀 교환대'],['powder','파우더룸'],['nu
 // 나갔다. 시민은 화면을 믿고 왔다가 거부당한다.
 const LIMIT_PERIOD={day:'1일',week:'1주',month:'1개월'};
 const LIMIT_SCOPE={all:'전체 화장실 통합',location:'이 화장실에서만'};
+// 지급 방식(2026-10-22). 예전 '지급 방식' 칸은 자유 글자라 안내 문구에만 쓰였다. 지금은 서버 동작을 정하는
+// 값이고(dispense_method), 안내 문구는 label 로 따로 둔다. 모르는 값은 서버와 똑같이 phone 으로 본다.
+const DISPENSE_METHOD={phone:'휴대전화 QR (누구나)',voucher:'인증 QR만 (QR 리더 필요)',both:'둘 다 (휴대전화 QR + 인증 QR)'};
+const methodOf=ds=>DISPENSE_METHOD[ds&&ds.method]?ds.method:'phone';
+// 인증 QR 은 리더에 대야 받는다. 리더가 없는 화장실에 인증 전용을 걸면 아무도 못 받는다 — 저장 전에 막는다.
+function methodError(method,features){
+  if((method==='voucher'||method==='both')&&!features.qr_reader) return "지급 방식이 '인증 QR' 이면 안전시설·기능에서 'QR 리더' 를 켜야 합니다. 리더가 없는 화장실은 '휴대전화 QR' 로 두세요.";
+  if(method!=='phone'&&!features.dispenser) return "배출기가 없는 화장실에는 지급 방식을 정할 수 없습니다. '생리용품 배출기' 를 켜거나 휴대전화 QR 로 두세요.";
+  return null;
+}
 function limitText(ds){
   const c=ds&&ds.limit_count; if(c===0) return '제한 없음';
   return `${LIMIT_PERIOD[(ds&&ds.limit_period)||'day']} ${c==null?1:c}회`;
@@ -1229,8 +1245,10 @@ function infoFields(p,i,addr){
     </div>
     <div class="fsec">무상 생리용품</div>
     <div class="grid2">
-      <div><label class="f">지급 방식</label><input id="${p}_method" value="${esc(ds.method||'QR 인증 후 무료')}"/></div>
-      <div><label class="f">제공 횟수</label>
+      <div><label class="f">지급 방식 <span class="muted" style="font-weight:400">· 서버가 이대로 판단</span></label><select id="${p}_method">
+        ${Object.entries(DISPENSE_METHOD).map(([k,v])=>`<option value="${k}" ${methodOf(ds)===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div><label class="f">안내 문구 <span class="muted" style="font-weight:400">· 키오스크 이용 안내에 표시</span></label><input id="${p}_label" value="${esc(ds.label||'QR 인증 후 무료')}"/></div>
+      <div><label class="f">제공 횟수 <span class="muted" style="font-weight:400">· 휴대전화 QR</span></label>
         <div style="display:flex;align-items:center;gap:6px">
           <select id="${p}_lperiod" style="flex:1">
             ${Object.entries(LIMIT_PERIOD).map(([k,v])=>`<option value="${k}" ${(ds.limit_period||'day')===k?'selected':''}>${v}</option>`).join('')}
@@ -1241,11 +1259,17 @@ function infoFields(p,i,addr){
         </div></div>
       <div><label class="f">횟수를 세는 범위</label><select id="${p}_lscope">
         ${Object.entries(LIMIT_SCOPE).map(([k,v])=>`<option value="${k}" ${(ds.limit_scope||'all')===k?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div><label class="f">연속 지급 제한 <span class="muted" style="font-weight:400">· 휴대전화 QR, 이 화장실</span></label>
+        <div style="display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px" class="muted">
+          간격 <input id="${p}_gap" type="number" min="0" style="width:58px;padding:9px 6px" value="${ds.min_gap_sec==null?60:esc(String(ds.min_gap_sec))}"/> 초 ·
+          <input id="${p}_bw" type="number" min="1" style="width:48px;padding:9px 6px" value="${ds.burst_window_min==null?10:esc(String(ds.burst_window_min))}"/> 분에
+          <input id="${p}_bc" type="number" min="0" style="width:48px;padding:9px 6px" value="${ds.burst_count==null?3:esc(String(ds.burst_count))}"/> 장
+        </div></div>
       <div style="align-self:end">
         <div style="font-size:12px;color:#414C63" id="${p}_lhint"></div></div>
     </div>
     <div style="font-size:12px;color:#414C63;margin-top:4px">
-      0 회로 두면 제한 없이 지급합니다. 이 값이 <b>키오스크 안내 문구이자 실제 제한</b>이라 둘이 어긋날 수 없습니다.
+      제공 횟수 0 회는 제한 없음. 연속 지급 제한은 휴대전화를 바꿔 가며 통을 비우는 것을 늦춥니다(0 = 끔). 인증 QR 의 한도는 🎫 인증 QR 화면의 발급 묶음에서 정합니다.
     </div>`;
 }
 
@@ -1258,18 +1282,32 @@ function readInfo(root,p){
     type:v('type')||null,
     stalls:{m_toilet:n('mt'),m_urinal:n('mu'),f_toilet:n('ft'),accessible:n('acc')},
     amenities:[...root.querySelectorAll('[data-am]')].filter(c=>c.checked).map(c=>c.dataset.am),
-    dispense:{method:v('method')||null,
+    dispense:{method:DISPENSE_METHOD[v('method')]?v('method'):'phone',
+      label:v('label')||null,
       limit_count:n('lcount')==null?1:n('lcount'),
       limit_period:v('lperiod')||'day',
-      limit_scope:v('lscope')||'all'} };
+      limit_scope:v('lscope')||'all',
+      min_gap_sec:n('gap')==null?60:n('gap'),
+      burst_window_min:n('bw')==null?10:Math.max(1,n('bw')),
+      burst_count:n('bc')==null?3:n('bc')} };
+}
+// 폼의 지급 방식과 기능 체크(data-feature)가 맞는지. 맞지 않으면 사유를 돌려준다.
+function methodErrorIn(root,p){
+  const sel=root.querySelector(`#${p}_method`); if(!sel) return null;
+  const features={}; root.querySelectorAll('[data-feature]').forEach(c=>{ if(c.checked) features[c.dataset.feature]=true; });
+  return methodError(sel.value,features);
 }
 // 설정을 그대로 문장으로 되비춘다. 저장 전에 무엇이 적용될지 보여야
 // "1일 2회로 바꿨는데 왜 안 되지" 가 생기지 않는다.
 function wireLimitHint(root,p){
   const hint=root.querySelector(`#${p}_lhint`); if(!hint) return;
-  const upd=()=>{ const i=readInfo(root,p);
-    hint.textContent=`키오스크 표시: ${limitText(i.dispense)} · ${LIMIT_SCOPE[i.dispense.limit_scope]}`; };
-  ['lcount','lperiod','lscope'].forEach(id=>{
+  const upd=()=>{ const i=readInfo(root,p); const m=i.dispense.method;
+    // 인증 전용이면 휴대전화 횟수 칸은 쓰이지 않는다 — 흐리게.
+    ['lcount','lperiod','lscope','gap','bw','bc'].forEach(id=>{ const e=root.querySelector(`#${p}_${id}`); if(e) e.style.opacity=m==='voucher'?'.45':''; });
+    hint.textContent = m==='voucher'
+      ? '인증 QR 전용 — 리더에 댄 코드의 발급 묶음 한도로 지급. 휴대전화 QR 은 표시되지 않음'
+      : `키오스크 표시: ${limitText(i.dispense)} · ${LIMIT_SCOPE[i.dispense.limit_scope]}${m==='both'?' · 인증 QR 도 받음':''}`; };
+  ['lcount','lperiod','lscope','method','gap','bw','bc'].forEach(id=>{
     const e=root.querySelector(`#${p}_${id}`); if(e) e.addEventListener('change',upd); });
   upd();
 }
@@ -1377,7 +1415,7 @@ function parseSheet(rows){
              stalls:{m_toilet:num('m_toilet'),m_urinal:num('m_urinal'),
                      f_toilet:num('f_toilet'),accessible:num('accessible')},
              amenities:Object.keys(am),
-             dispense:{method:'QR 인증 후 무료',
+             dispense:{method:'phone', label:'QR 인증 후 무료',
                        limit_count:num('limit_count')==null?1:num('limit_count'),
                        limit_period:period||'day', limit_scope:scope||'all'} } });
   });
@@ -1668,6 +1706,203 @@ function promoPlayLabel(m){
   const rep = m.repeat_forever ? '계속' : `${m.repeat_count||1}회`;
   if(m.kind==='video') return `영상 · ${rep}${m.repeat_gap_sec?` · 간격 ${m.repeat_gap_sec}초`:''}${m.sound?` · 소리 ${m.volume==null?100:m.volume}`:''}`;
   return `사진 · ${m.duration_sec}초 · ${rep}`;
+}
+// ── 인증 QR(바우처) ──
+// 기관이 발급한 QR 을 키오스크 리더에 대야 받는 방식(2026-10-22). 서버에는 코드의 해시만 있고 원본 코드는
+// 발급 응답에만 한 번 온다 — 그래서 발급 즉시 인쇄 창을 연다. 누구에게 줬는지는 발급 번호로 기관 명단이
+// 안다(이 시스템은 이름·연락처를 받지 않는다). 한도·유효기간은 묶음 단위, 정지는 한 장 단위.
+const VSTATUS={active:{l:'유효',c:'b-g'},suspended:{l:'정지',c:'b-a'},revoked:{l:'폐기',c:'b-x'}};
+const vLimitText=b=>`${b.limit_count===0?'제한 없음':`${LIMIT_PERIOD[b.limit_period]||b.limit_period} ${b.limit_count}회`}${b.monthly_cap?` · 월 ${b.monthly_cap}개까지`:''}`;
+const todayKst=()=>new Date(Date.now()+9*3600e3).toISOString().slice(0,10);
+const FSEC_BAND='margin:0 0 10px;padding:9px 14px;font-size:14.5px;background:#EEF2FB;border-left:4px solid #4353E0;border-radius:8px';
+async function renderVouchers(orgId){
+  mountShell();
+  const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
+  let mine; try{ mine=await rpc('promo_manageable_orgs'); }catch(e){ body.innerHTML=`<div class="err">기관 조회 실패: ${esc(e.message)}</div>`; return; }
+  mine=mine||[];
+  if(!mine.length){ body.innerHTML='<div class="err">인증 QR 을 발급할 수 있는 기관이 없습니다.</div>'; return; }
+  const org = mine.find(o=>o.id===orgId) || mine.find(o=>o.id===state.profile.org_id) || mine[0];
+  let locs=[], batches=[]; const stats={};
+  try{
+    ({data:locs}=await supabase.from('locations').select('id, code, name').eq('org_id',org.id).order('name'));
+    const r=await supabase.from('voucher_batches').select('*').eq('org_id',org.id).order('created_at',{ascending:false}); if(r.error) throw r.error; batches=r.data||[];
+    const ss=await Promise.all(batches.map(b=>rpc('voucher_batch_stats',{p_batch:b.id}).catch(()=>null)));
+    batches.forEach((b,i)=>{ stats[b.id]=ss[i]; });
+  }catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
+  locs=locs||[];
+  const locName=id=> id ? ((locs.find(l=>l.id===id)||{}).name||'(삭제된 화장실)') : '';
+  const today=todayKst();
+  const rows=batches.map(b=>{ const s=stats[b.id]||{}; const over=b.valid_until<today;
+    return `<tr data-id="${b.id}" style="${over?'opacity:.55':''}">
+      <td><b>${esc(b.name)}</b>${b.note?`<div class="muted" style="font-size:12px">${esc(b.note)}</div>`:''}</td>
+      <td>${b.scope==='location'?esc(locName(b.location_id)):'지자체 전체'}</td>
+      <td>${esc(vLimitText(b))}</td>
+      <td class="nowrap">${esc(b.valid_from)} ~ ${esc(b.valid_until)}${over?' '+badge('만료','b-x'):''}</td>
+      <td class="nowrap">${b.count}장</td>
+      <td class="nowrap">${s.issued!=null?`${badge(`유효 ${s.active}`,'b-g')} ${s.suspended?badge(`정지 ${s.suspended}`,'b-a'):''} ${s.revoked?badge(`폐기 ${s.revoked}`,'b-x'):''}`:'-'}</td>
+      <td class="nowrap">${s.issued!=null?`${s.used_total}회 <span class="muted">· 이달 ${s.used_month} · ${s.ever_used}장 사용됨</span>`:'-'}</td>
+      <td class="muted nowrap">${fmtDt(b.created_at)}</td>
+      <td class="nowrap"><button class="btn sm line iss" ${over?'disabled':''}>발급</button> <button class="btn sm line lst" ${b.count?'':'disabled'}>코드 목록</button></td>
+    </tr>`; }).join('');
+  body.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div><h2 style="margin:0">🎫 인증 QR <span class="muted" style="font-weight:400;font-size:14px">발급 · 정지 · 사용 현황</span></h2>
+        <div class="muted" style="font-size:13px;margin-top:4px">대상자에게 나눠 준 QR 을 키오스크 리더에 대면 지급됩니다. 지급 방식이 '인증 QR' 또는 '둘 다' 인 화장실에서만 받습니다.<br>
+        누구에게 줬는지는 <b>발급 번호</b>로 기관의 명단에 적어 두세요 — 이 시스템은 이름·연락처를 받지 않습니다.</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label class="muted">기관</label>
+        <select id="org">${mine.map(o=>`<option value="${o.id}" ${o.id===org.id?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+        <button class="btn sm" id="newb">＋ 발급 묶음 만들기</button>
+        <button class="btn sm line" id="back">← 목록</button></div>
+    </div>
+    <div class="fsec" style="${FSEC_BAND}">발급 묶음 <span class="muted" style="font-weight:400;font-size:12.5px">한도·유효기간은 묶음 단위입니다. 분실한 QR 은 '코드 목록'에서 번호로 찾아 정지하세요</span></div>
+    <div class="tscroll"><table>
+      <thead><tr><th>묶음</th><th>쓸 수 있는 곳</th><th>한도 (QR 1장당)</th><th>유효기간</th><th>발급</th><th>상태</th><th>사용</th><th>만든 날</th><th></th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="9" class="muted" style="text-align:center;padding:30px">아직 발급 묶음이 없습니다. "발급 묶음 만들기" 로 시작하세요.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+  const q=sel=>body.querySelector(sel);
+  q('#back').onclick=renderDashboard;
+  q('#org').onchange=e=>renderVouchers(e.target.value);
+  q('#newb').onclick=()=>voucherBatchForm(org,locs,()=>renderVouchers(org.id));
+  body.querySelectorAll('tr[data-id]').forEach(tr=>{ const b=batches.find(x=>x.id===tr.dataset.id);
+    tr.querySelector('.iss').onclick=()=>voucherIssue(org,b,()=>renderVouchers(org.id));
+    tr.querySelector('.lst').onclick=()=>voucherList(org,b,locName);
+  });
+}
+// 묶음 만들기 — 넓은 창, 구역별(무엇을 위한 것인가 / 한도 / 유효기간).
+function voucherBatchForm(org,locs,onDone){
+  const today=todayKst(); const d=new Date(Date.now()+9*3600e3); d.setFullYear(d.getFullYear()+1); const until=d.toISOString().slice(0,10);
+  const bd=modalEl(`<h2 style="margin:0 0 6px">발급 묶음 만들기 <span class="muted" style="font-weight:400;font-size:15px">— ${esc(org.name)}</span></h2>
+    <div class="fsec">무엇을 위한 QR 인가</div>
+    <div class="grid2">
+      <div><label class="f">묶음 이름</label><input id="b_name" placeholder="예: 청소년 지원 1차"/></div>
+      <div><label class="f">쓸 수 있는 곳</label><select id="b_scope"><option value="org">지자체 전체</option><option value="location">특정 화장실 하나</option></select></div>
+      <div id="b_locbox" style="display:none"><label class="f">화장실</label><select id="b_loc">${locs.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select></div>
+      <div><label class="f">메모(선택)</label><input id="b_note" placeholder="배부처 등. 이름·전화번호는 적지 마세요"/></div>
+    </div>
+    <div class="fsec">QR 1장당 한도</div>
+    <div class="grid2">
+      <div><label class="f">제공 횟수</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <select id="b_period" style="flex:1">${Object.entries(LIMIT_PERIOD).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+          <input id="b_count" type="number" min="0" value="1" style="width:70px"/><span class="muted" style="font-size:13px">회</span></div></div>
+      <div><label class="f">월 총량(선택)</label>
+        <div style="display:flex;align-items:center;gap:6px"><input id="b_cap" type="number" min="1" placeholder="없음" style="width:90px"/><span class="muted" style="font-size:13px">개까지</span></div></div>
+      <div style="align-self:end;font-size:12px;color:#414C63">예) 1일 1회 + 월 10개 → 하루 한 개씩, 한 달에 열 개까지. 횟수 0 은 제한 없음.</div>
+    </div>
+    <div class="fsec">유효기간</div>
+    <div class="grid2">
+      <div><label class="f">시작</label><input id="b_from" type="date" value="${today}"/></div>
+      <div><label class="f">끝</label><input id="b_until" type="date" value="${until}"/></div>
+      <div style="align-self:end;font-size:12px;color:#414C63">기간이 지나면 QR 은 자동으로 쓸 수 없게 됩니다.</div>
+    </div>
+    <div class="mfoot"><button class="btn" data-save>만들기</button><button class="btn line" data-x>취소</button><div id="e_msg"></div></div>`,'wide');
+  bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&!el.style.width) el.style.width='100%'; });
+  const q=s=>bd.querySelector(s);
+  q('[data-x]').onclick=()=>bd.remove();
+  q('#b_scope').onchange=e=>{ q('#b_locbox').style.display=e.target.value==='location'?'':'none'; };
+  q('[data-save]').onclick=async()=>{
+    const name=q('#b_name').value.trim(), scope=q('#b_scope').value, from=q('#b_from').value, until=q('#b_until').value;
+    const msg=q('#e_msg'); const err=t=>{ msg.innerHTML=`<div class="err">${esc(t)}</div>`; };
+    if(!name) return err('묶음 이름을 적어 주세요.');
+    if(scope==='location'&&!q('#b_loc').value) return err('화장실을 고르세요.');
+    if(!from||!until||until<from) return err('유효기간 끝은 시작보다 뒤여야 합니다.');
+    const cap=q('#b_cap').value.trim();
+    try{
+      await rpc('create_voucher_batch',{ p_org:org.id, p_name:name, p_valid_until:until, p_scope:scope,
+        p_location:scope==='location'?q('#b_loc').value:null,
+        p_limit_count:parseInt(q('#b_count').value||'1',10), p_limit_period:q('#b_period').value,
+        p_monthly_cap:cap?parseInt(cap,10):null, p_valid_from:from, p_note:q('#b_note').value.trim()||null });
+      bd.remove(); onDone();
+    }catch(e){ err('만들기 실패: '+e.message); }
+  };
+}
+// 발급 → 인쇄 창. 창은 클릭 안에서 먼저 열어야 팝업 차단에 안 걸린다(발급 응답을 기다린 뒤 열면 막힌다).
+function voucherIssue(org,b,onDone){
+  const bd=modalEl(`<h2 style="margin:0 0 6px">QR 발급 <span class="muted" style="font-weight:400;font-size:15px">— ${esc(b.name)}</span></h2>
+    <p class="muted" style="font-size:13px;line-height:1.5">발급하면 <b>인쇄 창</b>이 열립니다. 코드 원본은 그 창에만 있고 서버에는 남지 않으니, 인쇄(또는 PDF 저장)를 마친 뒤 닫으세요.<br>발급 번호는 <code>${esc(org.code)}-연월-일련</code> 으로 이어집니다.</p>
+    <div class="grid2">
+      <div><label class="f">장수</label><input id="v_n" type="number" min="1" max="1000" value="50" style="width:100%"/></div>
+      <div><label class="f">카드 크기</label><select id="v_size" style="width:100%"><option value="card">명함형 · A4 한 장에 10장</option><option value="big">큰 카드 · A4 한 장에 4장</option></select></div>
+    </div>
+    <div id="v_msg" style="margin:10px 0"></div>
+    <div style="display:flex;gap:8px"><button class="btn" id="go">발급하고 인쇄 창 열기</button><button class="btn line" data-x>취소</button></div>`);
+  const q=s=>bd.querySelector(s);
+  q('[data-x]').onclick=()=>bd.remove();
+  q('#go').onclick=async()=>{
+    const n=parseInt(q('#v_n').value,10); const msg=q('#v_msg');
+    if(!(n>=1&&n<=1000)){ msg.innerHTML='<div class="err">장수는 1~1000 사이로.</div>'; return; }
+    const w=window.open('','_blank'); if(!w){ msg.innerHTML='<div class="err">인쇄 창이 막혔습니다. 브라우저의 팝업 차단을 풀고 다시 누르세요.</div>'; return; }
+    w.document.write('<p style="font-family:sans-serif">발급 중…</p>');
+    q('#go').disabled=true;
+    try{ const list=await rpc('issue_vouchers',{p_batch:b.id,p_n:n}); writeVoucherPrint(w,org,b,list||[],q('#v_size').value); bd.remove(); onDone(); }
+    catch(e){ w.close(); q('#go').disabled=false; msg.innerHTML=`<div class="err">발급 실패: ${esc(e.message)}</div>`; }
+  };
+}
+// 인쇄 페이지. QR 은 GIF 데이터 URL(qrcode-generator). 코드 원본은 이 페이지와 CSV 버튼에만 있다.
+function writeVoucherPrint(w,org,b,list,size){
+  const big=size==='big';
+  const cards=list.map(v=>{ const qr=qrcode(0,'M'); qr.addData(v.code); qr.make();
+    return `<div class="c"><div class="h"><b>무상 생리용품 인증 QR</b><span>${esc(org.name)}</span></div>
+      <div class="m"><img src="${qr.createDataURL(4,0)}" alt=""><div class="t"><div class="s">${esc(v.serial)}</div>
+        <div>${esc(b.name)}</div><div>${esc(vLimitText(b))}</div><div>${esc(b.valid_from)} ~ ${esc(b.valid_until)}</div></div></div>
+      <div class="f">키오스크의 QR 리더에 대 주세요 · 분실 시 발급처에 알려 주세요</div></div>`; }).join('');
+  const csv='﻿발급번호,코드\n'+list.map(v=>`${v.serial},${v.code}`).join('\n');
+  w.document.open(); w.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>인증 QR ${esc(b.name)} ${list.length}장</title>
+  <style>
+    body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;color:#1B2540;background:#EEF1F6}
+    .bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #DDE3EE;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px}
+    .bar button{border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;background:#4353E0;color:#fff} .bar a{color:#4353E0}
+    .warn{color:#B5730A;font-weight:600}
+    .sheet{display:grid;grid-template-columns:repeat(2,${big?'90mm':'85mm'});gap:${big?'8mm':'4mm'};padding:8mm;justify-content:center}
+    .c{width:${big?'90mm':'85mm'};height:${big?'125mm':'54mm'};border:1px solid #9AA4B8;border-radius:3mm;padding:${big?'5mm':'3mm'};background:#fff;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;page-break-inside:avoid}
+    .h{display:flex;justify-content:space-between;font-size:${big?'4mm':'2.9mm'}} .h span{color:#4A5468}
+    .m{display:flex;gap:${big?'5mm':'3mm'};align-items:center;${big?'flex-direction:column;text-align:center':''}}
+    .m img{width:${big?'55mm':'30mm'};height:${big?'55mm':'30mm'};image-rendering:pixelated;flex:none}
+    .t{font-size:${big?'3.6mm':'2.7mm'};line-height:1.45;color:#36405A} .s{font-family:Consolas,monospace;font-weight:700;font-size:${big?'5.5mm':'4mm'};color:#1B2540;letter-spacing:.3mm}
+    .f{font-size:${big?'3mm':'2.4mm'};color:#4A5468}
+    @page{size:A4;margin:0} @media print{.bar{display:none} body{background:#fff} .sheet{padding:10mm}}
+  </style></head><body>
+  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button>
+    <a download="${esc(b.name)}_${esc(org.code)}_코드.csv" href="data:text/csv;charset=utf-8,${encodeURIComponent(csv)}">코드 목록 CSV 저장</a>
+    <span>${esc(org.name)} · ${esc(b.name)} · ${list.length}장 · ${esc(list[0]?list[0].serial:'')} ~ ${esc(list[list.length-1]?list[list.length-1].serial:'')}</span>
+    <span class="warn">이 창을 닫으면 코드를 다시 볼 수 없습니다 — 인쇄를 먼저 하세요</span></div>
+  <div class="sheet">${cards}</div></body></html>`); w.document.close();
+}
+// 한 묶음의 코드 목록 — 번호로 찾아 정지·해제·폐기, 메모.
+async function voucherList(org,b,locName){
+  const bd=modalEl(`<h2 style="margin:0 0 6px">코드 목록 <span class="muted" style="font-weight:400;font-size:15px">— ${esc(b.name)} · ${b.scope==='location'?esc(locName(b.location_id)):'지자체 전체'} · ${esc(vLimitText(b))}</span></h2>
+    <div style="display:flex;gap:10px;align-items:center;margin:10px 0"><input id="vq" placeholder="발급 번호로 찾기 (예: 0012)" style="width:260px"/>
+      <select id="vf"><option value="">전체</option><option value="active">유효</option><option value="suspended">정지</option><option value="revoked">폐기</option></select>
+      <span class="muted" id="vcnt" style="font-size:13px"></span></div>
+    <div class="tscroll" style="max-height:62vh;overflow:auto"><table><thead><tr><th>발급 번호</th><th>상태</th><th>사용</th><th>마지막 사용</th><th>메모</th><th></th></tr></thead><tbody id="vt"></tbody></table></div>
+    <div class="mfoot"><button class="btn line" data-x>닫기</button><div id="e_msg"></div></div>`,'wide');
+  const q=s=>bd.querySelector(s); q('[data-x]').onclick=()=>bd.remove();
+  let items=[];
+  const load=async()=>{ const r=await supabase.from('vouchers').select('*').eq('batch_id',b.id).order('serial'); if(r.error){ q('#e_msg').innerHTML=`<div class="err">${esc(r.error.message)}</div>`; return; } items=r.data||[]; draw(); };
+  const draw=()=>{
+    const s=q('#vq').value.trim().toLowerCase(), f=q('#vf').value;
+    const list=items.filter(v=>(!s||v.serial.toLowerCase().includes(s))&&(!f||v.status===f));
+    q('#vcnt').textContent=`${list.length} / ${items.length}장`;
+    q('#vt').innerHTML=list.map(v=>{ const st=VSTATUS[v.status]||{l:v.status,c:'b-x'};
+      return `<tr data-id="${v.id}"><td class="nowrap"><b style="font-family:Consolas,monospace">${esc(v.serial)}</b></td>
+        <td>${badge(st.l,st.c)}${v.status_note?`<div class="muted" style="font-size:12px">${esc(v.status_note)}${v.status_at?' · '+fmtDt(v.status_at):''}</div>`:''}</td>
+        <td>${v.use_count}회</td><td class="muted">${v.last_used_at?fmtDt(v.last_used_at):'-'}</td>
+        <td><input class="memo" value="${esc(v.memo||'')}" placeholder="배부처 등 (이름·전화 금지)" style="width:220px;padding:5px 8px;font-size:13px"/></td>
+        <td class="nowrap">${v.status==='active'?'<button class="btn sm line act" data-st="suspended">정지</button> ':''}${v.status==='suspended'?'<button class="btn sm line act" data-st="active">정지 해제</button> ':''}${v.status!=='revoked'?'<button class="btn sm line act" data-st="revoked" style="color:#E0322F">폐기</button>':''}</td></tr>`; }).join('')
+      ||'<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">해당하는 코드가 없습니다.</td></tr>';
+    q('#vt').querySelectorAll('tr[data-id]').forEach(tr=>{ const v=items.find(x=>x.id===tr.dataset.id);
+      tr.querySelector('.memo').onchange=async e=>{ const {error}=await supabase.from('vouchers').update({memo:e.target.value.trim()||null}).eq('id',v.id); if(error) alert('메모 저장 실패: '+error.message); };
+      tr.querySelectorAll('.act').forEach(btn=>btn.onclick=async()=>{ const st=btn.dataset.st;
+        let note=null;
+        if(st==='revoked'){ if(!confirm(`${v.serial} 을(를) 폐기할까요? 되돌릴 수 없습니다.`)) return; }
+        else if(st==='suspended'){ note=prompt(`${v.serial} 정지 사유 (예: 분실)`,'분실'); if(note===null) return; }
+        try{ await rpc('set_voucher_status',{p_id:v.id,p_status:st,p_note:note}); await load(); }catch(e){ alert('변경 실패: '+e.message); } });
+    });
+  };
+  q('#vq').oninput=draw; q('#vf').onchange=draw;
+  await load();
 }
 async function renderPromo(orgId){
   mountShell();
@@ -2108,6 +2343,7 @@ function renderAdd(){
       // 시민에게 보이는 값이라 막는다. 여기서 통과시키면 키오스크에 빈 칸이
       // 나가고, 그것을 나중에 채우는 일은 대개 일어나지 않는다.
       if(!infoOk(info,addr)){ msg.innerHTML='<div class="err">주소·관리기관·연락처·운영시간은 필수입니다. (24시간 운영이면 체크)</div>'; return; }
+      const me=methodErrorIn(pane,'n'); if(me){ msg.innerHTML=`<div class="err">${esc(me)}</div>`; return; }
       const sensors={}; pane.querySelectorAll('[data-sensor]').forEach(c=>{ if(c.checked) sensors[c.dataset.sensor]=true; });
       const features={}; pane.querySelectorAll('[data-feature]').forEach(c=>{ if(c.checked) features[c.dataset.feature]=true; });
       try{const res=await rpc('admin_create_location',{p_org_code:org,p_code,p_name,
