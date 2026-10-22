@@ -121,6 +121,8 @@
   .envgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; position:relative; }
   /* 이용 현황 탭(2026-10-23): 환경 탭과 같은 결 — 타일 4장 + 카드 2×2 */
   .ugrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .uband { display:flex; align-items:baseline; gap:10px; margin:18px 2px 8px; padding-left:10px; border-left:4px solid #2A78D6; font-size:15px; color:#1F2C48; }
+  .uband .muted { font-size:12px; }
   .ulist { display:flex; flex-direction:column; gap:6px; padding:4px 2px; }
   .urow { display:flex; align-items:center; gap:10px; font-size:13px; color:#36405A; }
   .etile.warn { border-color:#F0D9A8; } .etile.bad { border-color:#F3B9B9; }
@@ -1019,6 +1021,7 @@ async function renderUsage(l){
       <div class="ecard" data-u="nowdoors"><div class="eh"><b>지금 칸별 상태</b> <span class="muted">${dr.now&&dr.now.at?esc(fmtDt(dr.now.at))+' 보고':''}</span><span class="ev muted"></span></div>${usageNowDoors((dr.now||{}).doors||[])}</div>
       <div class="ecard" data-u="conc"><div class="eh"><b>시간대별 동시 사용 최대</b> <span class="muted">칸 · 최근 7일</span><span class="ev muted"></span></div>${usageCatBars((dr.concurrency||[]).map(c=>({label:`${c.hour}시`,n:c.max_busy})),'#2A78D6',4)}</div>`:''}
     </div>
+    ${usageExtraHtml(o.extra||{}, o.days, dr, daily)}
     <div class="muted" style="font-size:12px;margin:6px 2px 14px">${esc(o.note||'')} · 예상 소진은 최근 14일 요일별 평균으로 셈(요일 평균이 0 이어도 하루 평균의 30% 는 나간다고 봄) · 암모니아 나쁨 지속은 4분 간격 측정 횟수 × 4분</div></div>`;
   wireUsageHover(document.getElementById('ubody'));
 }
@@ -1081,6 +1084,57 @@ function usageNowDoors(ds){
 }
 // 상대 시간(이용 현황 전용) — '방금 / N분 전 / N시간 전 / N일 전'
 function usageAgo(iso){ if(!iso) return null; const m=Math.round((Date.now()-new Date(iso))/60000); return m<1?'방금':m<60?`${m}분 전`:m<1440?`${Math.round(m/60)}시간 전`:`${Math.round(m/1440)}일 전`; }
+// ── 더 보기(2026-10-23): 쌓여 있는 다른 기록을 같은 기간으로 — 이용 프로파일·지급·민원·만족도·청소·환경·기기·직전 기간 비교
+const METHOD_KO={qr:'휴대전화 QR',phone:'휴대전화 QR',voucher:'인증 QR',admin:'관리자',test:'시험'};
+const DEV_KO={board_reset:'보드 재시작',dispense_fail:'지급 실패',dispenser_fault:'배출기 고장 잠금',dispenser_unstick:'걸림 해제',link_down:'보드 통신 끊김',link_up:'보드 통신 복구',voucher_reject:'인증 QR 거부',long_stay:'장시간 재실',long_stay_end:'장시간 재실 끝',pin_locked:'PIN 잠김',hopper_refill:'생리대 보충',hopper_empty:'생리대 소진',hopper_mismatch:'잔량 불일치',hopper_calibration_done:'호퍼 보정 완료',hopper_calibration_failed:'호퍼 보정 실패',hopper_confirmed:'잔량 확인',dispense_test:'배출 시험',door_fault:'문 점검',sensor_battery_low:'센서 전지 부족',sensor_stale:'센서 안 들림',ble_raw:'센서 원시 기록',calibration_stall:'보정 멈춤',hopper_manual:'잔량 직접 입력'};
+function usageExtraHtml(ex, days, dr, daily){
+  const sec=(t,sub)=>`<div class="uband"><b>${t}</b>${sub?`<span class="muted">${sub}</span>`:''}</div>`;
+  const hourly=(ex.hourly||[]).map((n,h)=>({label:`${h}시`,n})), dow=(ex.dow||[]).map((n,d)=>({label:DOW_KO[d],n}));
+  const dp=ex.dispense||{}, cp=ex.complaints||{}, st=ex.satisfaction||{}, cl=ex.cleaning||{}, en=ex.env, dv=ex.device||{}, pv=ex.prev||{};
+  const curDisp=dp.completed||0, curComp=cp.total||0, curSat=st.total||0, curClean=cl.total||0;
+  const cmp=(cur,prev,unitTxt)=>{ if(prev==null) return '-'; const d=cur-prev; const pct=prev?Math.round(100*d/prev):null; return `${cur}${unitTxt} <span class="muted">(직전 ${prev}${unitTxt}${pct!=null?` · ${d>=0?'+':''}${pct}%`:''})</span>`; };
+  const methods=Object.entries(dp.by_method||{}).sort((a,b)=>b[1]-a[1]).map(([k,n])=>({label:METHOD_KO[k]||k,n}));
+  const cats=(cp.by_category||[]).map(c=>({label:c.k,n:c.n})), reasons=(st.reasons||[]).map(r=>({label:r.k,n:r.n}));
+  const dist=(st.dist||[]).map((n,i)=>({label:`${i+1}점`,n}));
+  const devs=Object.entries(dv).filter(([k])=>!/^(dispense_test|ble_raw|hopper_manual)$/.test(k)).sort((a,b)=>b[1]-a[1]).map(([k,n])=>({label:DEV_KO[k]||k,n}));
+  const night=(ex.hourly||[]).reduce((a,n,h)=>a+((h>=22||h<6)?n:0),0), tot=(ex.hourly||[]).reduce((a,n)=>a+n,0);
+  return `
+    ${sec('이용 프로파일', dr?'칸 센서 실측 + 상호작용':'상호작용(지급·민원·만족도)')}
+    <div class="ugrid">
+      <div class="ecard" data-u="hourly"><div class="eh"><b>시간대별 합계</b> <span class="muted">${days}일 · 심야(22~06) ${tot?Math.round(100*night/tot):0}%</span><span class="ev muted"></span></div>${usageCatBars(hourly,'#2A78D6',4)}</div>
+      <div class="ecard" data-u="dow"><div class="eh"><b>요일별 합계</b> <span class="muted">주말 비중 ${dp.weekend_share!=null?dp.weekend_share+'% (지급 기준)':'-'}</span><span class="ev muted"></span></div>${usageCatBars(dow,'#2A78D6')}</div>
+    </div>
+    ${sec('직전 기간과 비교', `${days}일 vs 그 전 ${days}일`)}
+    <div class="etiles">
+      <div class="etile"><div class="l">지급</div><div class="v" style="font-size:20px">${cmp(curDisp,pv.dispense,'개')}</div><div class="s">${dp.failed?`실패·미완료 ${dp.failed}건`:'실패 없음'}${methods.length?` · ${methods.map(m=>`${m.label} ${m.n}`).join(' · ')}`:''}</div></div>
+      <div class="etile ${cp.open?'warn':''}"><div class="l">민원</div><div class="v" style="font-size:20px">${cmp(curComp,pv.complaints,'건')}</div><div class="s">미처리 ${cp.open||0} · 처리 ${cp.done||0}${cp.avg_hours!=null?` · 평균 처리 ${cp.avg_hours}시간`:''}</div></div>
+      <div class="etile ${st.low_share>=30?'warn':''}"><div class="l">만족도</div><div class="v" style="font-size:20px">${st.avg!=null?st.avg.toFixed(1)+'점':'-'} <span class="muted" style="font-size:13px;font-weight:600">${pv.rating!=null?`(직전 ${(+pv.rating).toFixed(1)}점)`:''}</span></div><div class="s">응답 ${curSat}건 · 1~2점 ${st.low_share!=null?st.low_share+'%':'-'}${st.by_source?` · ${Object.entries(st.by_source).map(([k,n])=>`${k==='menu'?'메뉴':k==='after_dispense'?'지급 뒤':k==='after_complaint'?'민원 뒤':k} ${n}`).join(' · ')}`:''}</div></div>
+      <div class="etile ${cl.days_without>0?'warn':''}"><div class="l">청소</div><div class="v" style="font-size:20px">${cmp(curClean,pv.cleanings,'회')}</div><div class="s">하루 ${cl.per_day??'-'}회 · 평균 간격 ${cl.avg_gap_h??'-'}시간 · 최장 ${cl.max_gap_h??'-'}시간 · 청소 없는 날 ${cl.days_without??'-'}일</div></div>
+    </div>
+    ${sec('민원 · 만족도')}
+    <div class="ugrid">
+      <div class="ecard"><div class="eh"><b>민원 유형</b> <span class="muted">건</span></div>${usageHBars(cats)}</div>
+      <div class="ecard" data-u="dist"><div class="eh"><b>만족도 분포</b> <span class="muted">건</span><span class="ev muted"></span></div>${usageCatBars(dist,'#2A78D6')}${reasons.length?`<div class="muted" style="font-size:12px;margin:4px 2px 0">아쉬운 점: ${reasons.map(r=>`${esc(r.label)} ${r.n}`).join(' · ')}</div>`:''}</div>
+    </div>
+    ${sec('청소 · 환경 · 기기')}
+    <div class="ugrid">
+      <div class="ecard" data-u="clh"><div class="eh"><b>청소 시각 분포</b> <span class="muted">회</span><span class="ev muted"></span></div>${usageCatBars((cl.hourly||[]).map((n,h)=>({label:`${h}시`,n})),'#2A78D6',4)}</div>
+      <div class="ecard"><div class="eh"><b>환경</b> <span class="muted">${en?`측정 ${en.readings}회`:''}</span></div>${en?`<div class="ulist">
+          <div class="urow"><span style="min-width:120px" class="muted">쾌적 비율</span><b>${en.comfort_pct}%</b><span class="muted">온도 14~29°C · 습도 70% 이하 · 암모니아 0.5ppm 미만 · PM2.5 35 이하를 모두 만족한 측정의 비율</span></div>
+          <div class="urow"><span style="min-width:120px" class="muted">온도</span><b>${en.temp.avg}°C</b><span class="muted">최저 ${en.temp.min} · 최고 ${en.temp.max}</span></div>
+          <div class="urow"><span style="min-width:120px" class="muted">습도</span><b>${en.hum.avg}%</b><span class="muted">최저 ${en.hum.min} · 최고 ${en.hum.max}</span></div>
+          <div class="urow"><span style="min-width:120px" class="muted">암모니아 나쁨</span><b>${en.nh3_bad_pct}%</b><span class="muted">측정 중 나쁨 기준을 넘은 비율</span></div></div>`:`<div class="muted" style="padding:18px 6px">이 기간에 환경 측정값이 없습니다.</div>`}</div>
+      <div class="ecard" style="grid-column:1/-1"><div class="eh"><b>기기 이벤트</b> <span class="muted">종류별 · ${days}일</span></div>${usageHBars(devs, '건')}</div>
+    </div>`;
+}
+// 가로 막대(유형별 수): 한 가지 색, 값은 글자로
+function usageHBars(items, unitTxt){
+  if(!items.length) return `<div class="muted" style="padding:18px 6px">기록이 없습니다.</div>`;
+  const max=Math.max(1,...items.map(i=>+i.n||0));
+  return `<div class="ulist">${items.map(i=>`<div class="urow" style="gap:8px"><span style="min-width:120px;color:#1F2C48">${esc(i.label)}</span>
+    <span style="flex:1;height:10px;border-radius:999px;background:#EAEFF6;overflow:hidden"><span style="display:block;height:10px;width:${Math.round(100*(+i.n||0)/max)}%;background:#2A78D6"></span></span>
+    <span style="min-width:48px;text-align:right;font-weight:700;color:#1F2C48">${i.n}${unitTxt||''}</span></div>`).join('')}</div>`;
+}
 function usageAnom(an){
   if(!an.length) return `<div class="muted" style="padding:18px 6px">이 기간에 이상 신호가 없습니다.</div>`;
   return `<div class="ulist">${an.slice(0,12).map(a=>{ const m=USAGE_ANOM[a.kind]||[a.kind,'b-b',x=>String(x.value)];
@@ -1091,7 +1145,7 @@ function wireUsageHover(box){
   const heat=box.querySelector('[data-u="heat"]'); if(heat){ const ev=heat.querySelector('.ev');
     heat.querySelectorAll('.hc').forEach(r=>{ r.addEventListener('pointerenter',()=>{ ev.textContent=`${DOW_KO[+r.dataset.d]}요일 ${r.dataset.h}시 · ${r.dataset.n}회`; r.setAttribute('stroke','#36405A'); });
       r.addEventListener('pointerleave',()=>{ ev.textContent=''; r.setAttribute('stroke','#E8ECF4'); }); }); }
-  box.querySelectorAll('[data-u="dwell"],[data-u="conc"]').forEach(c=>{ const ev=c.querySelector('.ev');
+  box.querySelectorAll('[data-u="dwell"],[data-u="conc"],[data-u="hourly"],[data-u="dow"],[data-u="dist"],[data-u="clh"]').forEach(c=>{ const ev=c.querySelector('.ev');
     c.querySelectorAll('.ucb').forEach(r=>{ r.addEventListener('pointerenter',()=>{ ev.textContent=`${r.dataset.l} · ${r.dataset.n}`; r.setAttribute('opacity','0.7'); });
       r.addEventListener('pointerleave',()=>{ ev.textContent=''; r.removeAttribute('opacity'); }); }); });
   box.querySelectorAll('[data-u="uses"]').forEach(c=>{ const ev=c.querySelector('.ev'); const dd=state._udoorDaily||[];
