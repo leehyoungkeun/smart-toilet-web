@@ -677,7 +677,7 @@ const EVENT_KO = { board_reset:['보드 리셋','b-b'], app_restart:['앱 재시
   // 2.1.33: 관리자 화면의 배출 테스트(단발·계속) 결과. detail = {mode, seq, run_id, result, ms} — ms 가 핵심(정상 6.3초, 조기 정지 1초대).
   dispense_test:['배출 테스트','b-b'],
   // 2.1.51: 인증 QR 거부(사유·발급 번호). 호퍼 추정기 기록은 hopper 번호가 붙는다.
-  voucher_reject:['인증 QR 거부','b-a'], hopper_switch_ignored:['비움 스위치 무시','b-x'], hopper_ref_suspect:['거리 센서 의심','b-a'],
+  voucher_reject:['인증 QR 거부','b-a'], pin_locked:['PIN 잠김(5회 틀림)','b-r'], hopper_switch_ignored:['비움 스위치 무시','b-x'], hopper_ref_suspect:['거리 센서 의심','b-a'],
   hopper_mismatch:['남은 양 불일치','b-a'], hopper_empty:['통 비움 확정','b-x'], hopper_jam:['배출 안 됨(거리 그대로)','b-a'], hopper_learn_rejected:['곡선 학습 보류','b-x'] };
 const VREJECT_KO = { invalid:'미등록 QR', not_voucher:'인증 QR 아님', suspended:'정지된 QR', revoked:'폐기된 QR', not_yet:'기간 전', expired:'기간 지남',
   wrong_area:'다른 지역 QR', limit_reached:'횟수 소진', monthly_cap:'월 총량 소진', out_of_stock:'재고 없음', voucher_disabled:'인증 QR 미사용 화장실', network:'통신 오류', unknown:'알 수 없음' };
@@ -1049,12 +1049,13 @@ function settingsHtml(l,d){
         ? `${esc(DISPENSE_METHOD[methodOf(ds)])}${methodOf(ds)==='voucher'?'':` · <b>${esc(limitText(ds))}</b> · ${esc(LIMIT_SCOPE[ds.limit_scope||'all'])}`}${ds.label?`<div class="muted" style="font-size:12px">안내: ${esc(ds.label)}</div>`:''}`
         : '<span class="muted">배출기 미설치</span>')}
       ${row('재고 부족 알림',(d&&d.alert_low_pct!=null)?`용량의 ${d.alert_low_pct}% 이하`:'-')}
+      ${row('관리자 PIN',d?pinStatusHtml(d).replace(/<button[\s\S]*?<\/button>/,''):'-')}
     </div></div>`;
 }
 function wireOverview(l){
   const q=sel=>document.querySelector(sel);
   // 설정을 못 읽어도 개요의 나머지는 보여야 한다.
-  supabase.from('location_settings').select('sensors,features,info,alert_low_pct')
+  supabase.from('location_settings').select('sensors,features,info,alert_low_pct,pin_is_default,pin_set_at,pin_locked_until')
     .eq('location_id',l.id).maybeSingle()
     .then(({data})=>{ const box=document.getElementById('ovset');
       if(box) box.innerHTML=settingsHtml(l,data); })
@@ -1101,6 +1102,12 @@ function openEdit(l){
       <div><label class="f">Wi-Fi 비밀번호 <span class="muted" style="font-weight:400">· ${l.device_wifi_psk_set?'설정됨 · 바꿀 때만 입력':'미설정'}</span></label><input id="e_net_psk" type="password" autocomplete="new-password" placeholder="${l.device_wifi_psk_set?'(유지)':'현장 공유기 비밀번호'}"/></div>
       <div style="font-size:12px;color:#414C63;align-self:end">저장하면 2분 안에 기기에 반영됩니다. 저장 네트워크가 사라져도 이 값으로 다시 붙습니다. LTE 현장은 이름·비밀번호를 비워 두세요.</div>
     </div>
+    <div class="fsec">현장 관리자 PIN <span class="muted" style="font-weight:400;font-size:12px">· 태블릿 관리자 화면 4자리 · 5회 틀리면 10분 잠김 · 발급·변경은 저장 버튼과 상관없이 바로 반영</span></div>
+    <div class="grid2">
+      <div><label class="f">상태</label><div id="e_pinstat" class="muted" style="padding:9px 0">불러오는 중…</div></div>
+      <div><label class="f">새 PIN(4자리)</label><div style="display:flex;gap:6px"><input id="e_pin" inputmode="numeric" maxlength="4" placeholder="비우고 발급하면 무작위" style="flex:1"/><button class="btn sm" type="button" id="e_pinset" style="flex:none">발급·변경</button></div></div>
+      <div style="align-self:end"><div id="e_pinmsg" style="font-size:13px;line-height:1.5"></div></div>
+    </div>
     <div id="e_info"><div class="muted" style="margin-top:14px">이용 안내 정보 불러오는 중…</div></div>
     <div class="fsec">설치된 센서</div>
     <div id="e_sensors" style="display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px">
@@ -1123,11 +1130,27 @@ function openEdit(l){
   bd.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox') el.style.width='100%'; });
   wireRegion(bd,'e');
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  // 현장 관리자 PIN: 발급·변경은 저장과 별개로 바로 반영된다. 새 PIN 은 이 응답에만 보인다(서버는 해시만 둔다).
+  const pinBtn=bd.querySelector('#e_pinset'); if(pinBtn) pinBtn.onclick=async()=>{
+    const v=bd.querySelector('#e_pin').value.trim(); const msg=bd.querySelector('#e_pinmsg');
+    if(v&&!/^\d{4}$/.test(v)){ msg.innerHTML='<span class="err">숫자 4자리로 적거나 비워 두세요.</span>'; return; }
+    if(!confirm(v?`PIN 을 ${v} 로 바꿀까요? 현장 관리자에게 새 PIN 을 알려야 합니다.`:'무작위 PIN 을 새로 발급할까요? 지금 쓰는 PIN 은 바로 못 쓰게 됩니다.')) return;
+    pinBtn.disabled=true;
+    try{ const r=await rpc('admin_set_location_pin',{p_location_id:l.id,p_pin:v||null});
+      msg.innerHTML=`<span class="ok" style="font-weight:700">새 PIN <b style="font-size:20px;font-family:Consolas,monospace;letter-spacing:2px">${esc(r.pin)}</b> — 지금 적어 두세요. 다시 볼 수 없습니다.</span>`;
+      bd.querySelector('#e_pin').value=''; const ps=bd.querySelector('#e_pinstat'); if(ps) ps.innerHTML=pinStatusHtml({pin_is_default:false,pin_set_at:new Date().toISOString()});
+    }catch(e){ msg.innerHTML=`<span class="err">${esc(e.message)}</span>`; }
+    finally{ pinBtn.disabled=false; }
+  };
+  bd.addEventListener('click',async e=>{ if(e.target&&e.target.id==='e_pinunlock'){ e.target.disabled=true;
+    try{ await rpc('admin_unlock_location_pin',{p_location_id:l.id}); const ps=bd.querySelector('#e_pinstat'); if(ps) ps.innerHTML=pinStatusHtml({pin_is_default:false,pin_set_at:null}); }
+    catch(err){ alert('해제 실패: '+err.message); e.target.disabled=false; } } });
   // 현재 센서 구성을 읽어 체크 상태를 맞춘다. 실패해도 나머지 수정은 가능해야 하므로 조용히 넘어간다.
-  supabase.from('location_settings').select('sensors,features,info').eq('location_id',l.id).maybeSingle()
+  supabase.from('location_settings').select('sensors,features,info,pin_is_default,pin_set_at,pin_locked_until').eq('location_id',l.id).maybeSingle()
     .then(({data})=>{ const cs=(data&&data.sensors)||{}, cf=(data&&data.features)||{};
       bd.querySelectorAll('[data-sensor]').forEach(cb=>{ cb.checked=!!cs[cb.dataset.sensor]; });
       bd.querySelectorAll('[data-feature]').forEach(cb=>{ cb.checked=!!cf[cb.dataset.feature]; });
+      const ps=bd.querySelector('#e_pinstat'); if(ps) ps.innerHTML=pinStatusHtml(data||{});
       const box=bd.querySelector('#e_info');
       if(box){ box.innerHTML=infoFields('m',(data&&data.info)||{},l.address);
         box.querySelectorAll('input,select').forEach(el=>{ if(el.type!=='checkbox'&&!['m_lcount','m_gap','m_bw','m_bc'].includes(el.id)) el.style.width='100%'; });
@@ -1216,6 +1239,13 @@ const LIMIT_SCOPE={all:'전체 화장실 통합',location:'이 화장실에서�
 const DISPENSE_METHOD={phone:'휴대전화 QR (누구나)',voucher:'인증 QR만 (QR 리더 필요)',both:'둘 다 (휴대전화 QR + 인증 QR)'};
 const methodOf=ds=>DISPENSE_METHOD[ds&&ds.method]?ds.method:'phone';
 // 인증 QR 은 리더에 대야 받는다. 리더가 없는 화장실에 인증 전용을 걸면 아무도 못 받는다 — 저장 전에 막는다.
+// 현장 관리자 PIN 상태(2026-10-22): 초기 PIN(1234) 그대로면 빨강 — 한 곳이 새면 전부 새는 구조라 발급을 재촉한다. 5회 틀리면 10분 잠김.
+function pinStatusHtml(d){
+  const locked=d&&d.pin_locked_until&&new Date(d.pin_locked_until)>new Date();
+  const base=(!d||d.pin_is_default!==false)?'<span class="badge b-r">초기 PIN(1234) 그대로 — 발급하세요</span>'
+    :`<span class="badge b-g">설정됨</span> <span class="muted" style="font-size:12px">${d.pin_set_at?fmtDt(d.pin_set_at)+' 변경':''}</span>`;
+  return base+(locked?` <span class="badge b-a">5회 틀려 잠김 · ${fmtDt(d.pin_locked_until)}까지</span> <button class="btn sm line" type="button" id="e_pinunlock">잠금 해제</button>`:'');
+}
 function methodError(method,features){
   if((method==='voucher'||method==='both')&&!features.qr_reader) return "지급 방식이 '인증 QR' 이면 안전시설·기능에서 'QR 리더' 를 켜야 합니다. 리더가 없는 화장실은 '휴대전화 QR' 로 두세요.";
   if(method!=='phone'&&!features.dispenser) return "배출기가 없는 화장실에는 지급 방식을 정할 수 없습니다. '생리용품 배출기' 를 켜거나 휴대전화 QR 로 두세요.";
@@ -2370,7 +2400,12 @@ function renderAdd(){
           p_capacity:parseInt(q('cap').value||'30',10),
           p_sensors:sensors, p_features:features, p_info:info, p_address:addr,
           p_alert_low_pct:parseInt(q('lowpct').value||'20',10)});
-        msg.innerHTML=`<div class="ok">등록 완료 — <code>${esc(res.code)}</code> · 페어링 코드 <code>${esc(res.pairing_code)}</code></div>`;
+        // 등록 직후 관리자 PIN 을 바로 발급한다(트리거의 초기 1234 를 그대로 두지 않게). 이 화면에만 한 번 보인다.
+        let pinTxt='';
+        try{ const pr=await rpc('admin_set_location_pin',{p_location_id:res.location_id,p_pin:null});
+             pinTxt=` · 관리자 PIN <b style="font-family:Consolas,monospace;font-size:16px;letter-spacing:2px">${esc(pr.pin)}</b> <span class="muted">(지금 적어 두세요 — 다시 볼 수 없습니다)</span>`; }
+        catch(e){ pinTxt=' · <span class="err">PIN 발급 실패 — 화장실 수정에서 발급하세요</span>'; }
+        msg.innerHTML=`<div class="ok">등록 완료 — <code>${esc(res.code)}</code> · 페어링 코드 <code>${esc(res.pairing_code)}</code>${pinTxt}</div>`;
         q('code').value='';q('name').value=''; pane.querySelector('#n_addr').value=''; showNext();
       }catch(e){msg.innerHTML=`<div class="err">실패: ${esc(e.message)}</div>`;}
     };
