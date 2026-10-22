@@ -119,6 +119,11 @@
   .etile .s { font-size:12px; color:#6B7590; } .etile .s b { color:#36405A; font-weight:600; }
   .etile.warn { border-color:#F0D9AF; } .etile.bad { border-color:#F3C2C2; background:#FFF8F8; }
   .envgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; position:relative; }
+  /* 이용 현황 탭(2026-10-23): 환경 탭과 같은 결 — 타일 4장 + 카드 2×2 */
+  .ugrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .ulist { display:flex; flex-direction:column; gap:6px; padding:4px 2px; }
+  .urow { display:flex; align-items:center; gap:10px; font-size:13px; color:#36405A; }
+  .etile.warn { border-color:#F0D9A8; } .etile.bad { border-color:#F3B9B9; }
   .sbars { padding:6px 2px 2px; } .sbar { display:grid; grid-template-columns:88px 1fr 40px; align-items:center; gap:10px; margin:7px 0; font-size:13px; }
   .sbar .sl { color:#36405A; font-weight:600; text-align:right; } .sbar .st { height:14px; background:#EEF1F7; border-radius:7px; overflow:hidden; }
   .sbar .st i { display:block; height:100%; background:#2A78D6; border-radius:7px; } .sbar .sn { color:#6B7590; text-align:right; }
@@ -132,7 +137,7 @@
   .pgn { min-width:30px; height:30px; padding:0 6px; border-radius:8px; border:1px solid #DDE3EE; background:#fff; color:#2B3A57; font-weight:600; cursor:pointer; }
   .pgn.on { background:#4353E0; color:#fff; border-color:#4353E0; }
   .pg select { height:30px; border-radius:8px; border:1px solid #DDE3EE; padding:0 8px; margin-right:6px; }
-  @media (max-width:900px){ .etiles { grid-template-columns:repeat(2,1fr); } .envgrid { grid-template-columns:1fr; } }
+  @media (max-width:900px){ .etiles { grid-template-columns:repeat(2,1fr); } .envgrid, .ugrid { grid-template-columns:1fr; } }
   .ovgrid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   .ovgrid > .card, .ovgrid > #ovset > .card { height:100%; box-sizing:border-box; }
   select.cst { font:inherit; font-size:12px; font-weight:700; padding:3px 22px 3px 8px; border-radius:999px; border:1px solid transparent; cursor:pointer; }
@@ -502,6 +507,7 @@ const ICON_PATH={
   events:'M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3M6 6h12v12H6zM9 9h6v6H9z',
   satisfaction:'M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.8l-6.2 3.3L7 14.1 2 9.3l6.9-1z',
   env:'M14 14.8V3.5a2.5 2.5 0 0 0-5 0v11.3a4 4 0 1 0 5 0z',
+  usage:'M3 3v18h18M7 16v-6M12 16V6M17 16v-3',
 };
 const svgIcon=(k)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
   stroke-linecap="round" stroke-linejoin="round"><path d="${ICON_PATH[k]||''}"/></svg>`;
@@ -543,7 +549,7 @@ function renderDetail(){
     if(k==='cleaning' && l.today_cleanings>0) return `<span class="n">${l.today_cleanings}</span>`;
     return '';
   };
-  const tabs=[{key:'overview',label:'개요'},...LOG_TABS].map(t=>
+  const tabs=[{key:'overview',label:'개요'},{key:'usage',label:'이용 현황'},...LOG_TABS].map(t=>
     `<div class="tab2 ${state.tab===t.key?'on':''}" data-t="${t.key}">${svgIcon(t.key)}<span>${esc(t.label)}</span>${badge(t.key)}</div>`).join('');
   // '목록' 은 이 화면을 떠나는 동작이라 제목 앞이 아니라 오른쪽 끝에 둔다.
   // 앞에 있으면 화장실 이름보다 먼저 읽히고, 다음 동작이 아니라 되돌아가기가
@@ -568,6 +574,7 @@ async function renderTab(l, admin){
     try{ el.innerHTML=overviewHtml(l,admin); wireOverview(l); }
     catch(e){ el.innerHTML=`<div class="err">개요를 그리지 못했습니다: ${esc(e.message)}</div>`; console.error(e); }
     return; }
+  if(state.tab==='usage'){ renderUsage(l); return; }
   const tab=LOG_TABS.find(t=>t.key===state.tab);
   const presets = tab.env ? [['오늘',1],['3일',3],['7일',7],['30일',30]] : [['오늘',1],['7일',7],['30일',30],['전체','null']];
   if(tab.env && state.range===null) state.range=3;
@@ -957,6 +964,94 @@ function wireEnvHover(box, series, from, to){
       const t=t0+(t1-t0)*((fx-EP.l)/(EW-EP.l-EP.r)); let best=0,bd=Infinity; pts.forEach((p,i)=>{ const d=Math.abs(p.t-t); if(d<bd){bd=d;best=i;} }); show(best,ev); });
     svg.addEventListener('pointerleave',hide); });
 }
+// ── 이용 현황 (2026-10-23, 1층) ──────────────────────────────────────────
+// 센서를 더 달기 전에 이미 시각이 찍힌 기록(지급·민원·만족도·환경·청소)으로 이용 패턴·소모품 수요·이상을 보인다.
+// 서버 RPC usage_overview 가 다 세어 주고(한국 시간 요일·시각), 여기서는 그린다. 색은 한 가지 파랑의 농담(양) — 종류별 색 없음.
+const DOW_KO=['일','월','화','수','목','금','토'];
+const USAGE_ANOM={ dispense_spike:['지급 급증','b-a',(a)=>`${a.value}개 (평소 ${a.expected}개)`], complaints:['민원 몰림','b-r',(a)=>`${a.value}건`],
+  nh3_bad:['악취 지속','b-r',(a)=>`나쁨 ${a.value}분`], no_cleaning:['청소 누락 이틀째','b-a',(a)=>`지급 ${a.value}개인데 청소 기록 없음`] };
+async function renderUsage(l){
+  const el=document.getElementById('tab');
+  const presets=[['7일',7],['28일',28],['8주',56],['92일',92]];
+  if(!state.udays) state.udays=28;
+  el.innerHTML=`<div class="rbar">${presets.map(([lab,d])=>`<button class="chip sm ${state.udays===d?'on':''}" data-d="${d}">${lab}</button>`).join('')}
+    <span style="flex:1"></span><span class="muted" style="font-size:12px">이용 = 키오스크 상호작용(지급·민원·만족도) 횟수 — 출입구 센서가 붙기 전까지의 대리 지표</span></div>
+    <div id="ubody" class="muted" style="padding:14px">불러오는 중…</div>`;
+  el.querySelectorAll('.chip[data-d]').forEach(b=>b.onclick=()=>{ state.udays=+b.dataset.d; renderUsage(l); });
+  const nh3bad=(ENV_METRICS.find(m=>m.s==='nh3')||{}).bad||2;
+  let o;
+  try{ o=await rpc('usage_overview',{p_location:l.id,p_days:state.udays,p_nh3_bad:nh3bad}); }
+  catch(e){ const b=document.getElementById('ubody'); if(b) b.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}${/usage_overview/.test(e.message)?' — usage_overview 마이그레이션이 아직 적용되지 않았습니다':''}</div>`; return; }
+  const body=document.getElementById('ubody'); if(!body) return;
+  const daily=o.daily||[], heat=o.heat||[], fc=o.forecast||{}, an=o.anomalies||[], peak=o.peak; state._udaily=daily;
+  const sum=k=>daily.reduce((a,d)=>a+(+d[k]||0),0);
+  const nDisp=sum('dispense'), nComp=sum('complaint'), nSat=sum('satis');
+  const wsum=daily.reduce((a,d)=>a+(d.rating_avg!=null?+d.rating_avg*(+d.satis||0):0),0);
+  const ratingAvg=nSat?wsum/nSat:null;
+  const tile=(lab,v,s,tone)=>`<div class="etile ${tone||''}"><div class="l">${lab}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const unit=u=>`<span class="muted" style="font-size:14px;font-weight:600">${u}</span>`;
+  const so=fc.stockout_date?String(fc.stockout_date).slice(5).replace('-','/'):null;
+  const tiles=[
+    tile('하루 평균 지급', fc.avg_per_day!=null?`${(+fc.avg_per_day).toFixed(1)}${unit('개')}`:'-', `최근 14일 기준 · 이 기간 합계 ${nDisp}개`),
+    tile('재고 예상 소진', fc.days_left!=null?`${fc.days_left}${unit('일 뒤')}`:'-',
+         fc.qty!=null?`지금 ${fc.qty} / ${fc.cap}개${so?` · ${so} 쯤`:''}`:'재고 기록 없음',
+         fc.days_left!=null&&fc.days_left<=3?'bad':fc.days_left!=null&&fc.days_left<=7?'warn':''),
+    tile('가장 붐비는 때', peak?`${DOW_KO[peak.dow]}요일 ${peak.hour}시`:'-', peak?`그 시간대 ${peak.n}회 · ${o.days}일 동안`:'기록 없음'),
+    tile('민원 · 만족도', `${nComp}${unit('건')} · ${ratingAvg!=null?ratingAvg.toFixed(1):'-'}${unit('점')}`, `민원 ${nComp}건 · 만족도 응답 ${nSat}건의 평균`, nComp>=3?'warn':''),
+  ].join('');
+  body.outerHTML=`<div id="ubody"><div class="etiles">${tiles}</div>
+    <div class="ugrid">
+      <div class="ecard" data-u="heat"><div class="eh"><b>요일 × 시간 이용</b> <span class="muted">횟수</span><span class="ev muted"></span></div>${usageHeat(heat)}</div>
+      <div class="ecard" data-u="disp"><div class="eh"><b>날짜별 지급</b> <span class="muted">개</span><span class="ev muted"></span></div>${usageBars(daily,'dispense','#2A78D6')}</div>
+      <div class="ecard" data-u="nh3"><div class="eh"><b>암모니아 나쁨 지속</b> <span class="muted">분/일 · 기준 ${nh3bad}ppm</span><span class="ev muted"></span></div>${usageBars(daily,'nh3_bad_min','#B5730A')}</div>
+      <div class="ecard" data-u="anom"><div class="eh"><b>이상 신호</b><span class="ev muted">${an.length}건</span></div>${usageAnom(an)}</div>
+    </div>
+    <div class="muted" style="font-size:12px;margin:6px 2px 14px">${esc(o.note||'')} · 예상 소진은 최근 14일 요일별 평균으로 셈(요일 평균이 0 이어도 하루 평균의 30% 는 나간다고 봄) · 암모니아 나쁨 지속은 4분 간격 측정 횟수 × 4분</div></div>`;
+  wireUsageHover(document.getElementById('ubody'));
+}
+// 열지도 7×24: 한 가지 파랑, 양이 많을수록 진하게. 0 은 흰 칸(테두리만).
+function usageHeat(heat){
+  const max=Math.max(1,...heat.map(h=>+h.n)); const cell={}; heat.forEach(h=>{ cell[h.dow*24+h.hour]=+h.n; });
+  const W=600,H=190, L=30,T=18, cw=(W-L-6)/24, ch=(H-T-18)/7;
+  let s='';
+  for(let d=0; d<7; d++){
+    s+=`<text x="${L-6}" y="${(T+d*ch+ch/2+4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#6B7590">${DOW_KO[d]}</text>`;
+    for(let h=0; h<24; h++){ const n=cell[d*24+h]||0; const a=n?0.15+0.85*(n/max):0;
+      s+=`<rect class="hc" data-d="${d}" data-h="${h}" data-n="${n}" x="${(L+h*cw+1).toFixed(1)}" y="${(T+d*ch+1).toFixed(1)}" width="${(cw-2).toFixed(1)}" height="${(ch-2).toFixed(1)}" rx="2" fill="${n?`rgba(42,120,214,${a.toFixed(2)})`:'#fff'}" stroke="#E8ECF4"/>`; }
+  }
+  for(let h=0; h<24; h+=6) s+=`<text x="${(L+h*cw+cw/2).toFixed(1)}" y="${T-6}" text-anchor="middle" font-size="10.5" fill="#6B7590">${h}시</text>`;
+  s+=`<text x="${(L+23*cw+cw/2).toFixed(1)}" y="${T-6}" text-anchor="middle" font-size="10.5" fill="#6B7590">23시</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="esvg">${s}</svg>`;
+}
+// 날짜별 막대 한 계열(색 한 가지). 막대 사이 2px, 위 끝 둥글게.
+function usageBars(daily,key,color){
+  const W=600,H=190,P={l:34,r:8,t:12,b:22}; const n=daily.length||1; const bw=(W-P.l-P.r)/n;
+  const vals=daily.map(d=>+d[key]||0); const vmax=Math.max(1,...vals); const step=niceStep(vmax/3);
+  const ys=v=>(H-P.b)-((H-P.b-P.t)*(v/(Math.ceil(vmax/step)*step)));
+  let s='';
+  for(let v=0; v<=Math.ceil(vmax/step)*step+1e-9; v+=step) s+=`<line x1="${P.l}" x2="${W-P.r}" y1="${ys(v).toFixed(1)}" y2="${ys(v).toFixed(1)}" stroke="#E8ECF4"/><text x="${P.l-6}" y="${(ys(v)+4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#6B7590">${Number.isInteger(v)?v:v.toFixed(1)}</text>`;
+  daily.forEach((d,i)=>{ const v=vals[i]; const x=P.l+i*bw+1, w=Math.max(1,bw-2), y=ys(v), h=(H-P.b)-y;
+    s+=`<rect class="ub" data-i="${i}" x="${x.toFixed(1)}" y="${(v?y:H-P.b-1).toFixed(1)}" width="${w.toFixed(1)}" height="${(v?h:1).toFixed(1)}" rx="${Math.min(3,w/2).toFixed(1)}" fill="${v?color:'#E8ECF4'}"/>`;
+    const dt=new Date(d.day+'T00:00:00'); if(n<=14 || dt.getDay()===1) s+=`<text x="${(x+w/2).toFixed(1)}" y="${H-P.b+14}" text-anchor="middle" font-size="10" fill="#6B7590">${dt.getMonth()+1}/${dt.getDate()}</text>`; });
+  if(!vals.some(v=>v>0)) s+=`<text x="${W/2}" y="${H/2}" text-anchor="middle" font-size="12" fill="#6B7590">이 기간에 기록이 없습니다</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="esvg" data-key="${key}">${s}</svg>`;
+}
+function usageAnom(an){
+  if(!an.length) return `<div class="muted" style="padding:18px 6px">이 기간에 이상 신호가 없습니다.</div>`;
+  return `<div class="ulist">${an.slice(0,12).map(a=>{ const m=USAGE_ANOM[a.kind]||[a.kind,'b-b',x=>String(x.value)];
+    return `<div class="urow"><span class="muted" style="min-width:48px">${String(a.day).slice(5).replace('-','/')}</span><span class="badge ${m[1]}">${m[0]}</span><span>${m[2](a)}</span></div>`; }).join('')}${an.length>12?`<div class="muted" style="padding:6px">외 ${an.length-12}건</div>`:''}</div>`;
+}
+function wireUsageHover(box){
+  if(!box) return;
+  const heat=box.querySelector('[data-u="heat"]'); if(heat){ const ev=heat.querySelector('.ev');
+    heat.querySelectorAll('.hc').forEach(r=>{ r.addEventListener('pointerenter',()=>{ ev.textContent=`${DOW_KO[+r.dataset.d]}요일 ${r.dataset.h}시 · ${r.dataset.n}회`; r.setAttribute('stroke','#36405A'); });
+      r.addEventListener('pointerleave',()=>{ ev.textContent=''; r.setAttribute('stroke','#E8ECF4'); }); }); }
+  box.querySelectorAll('[data-u="disp"],[data-u="nh3"]').forEach(c=>{ const ev=c.querySelector('.ev'); const key=c.querySelector('svg').dataset.key;
+    c.querySelectorAll('.ub').forEach(r=>{ r.addEventListener('pointerenter',()=>{ const d=(state._udaily||[])[+r.dataset.i]; if(!d) return;
+        ev.textContent=`${String(d.day).slice(5).replace('-','/')} · ${key==='dispense'?`지급 ${d.dispense}개 · 민원 ${d.complaint}건 · 응답 ${d.satis}건 · 청소 ${d.cleanings}회`:`나쁨 ${d.nh3_bad_min}분 · 청소 ${d.cleanings}회`}`; r.setAttribute('opacity','0.7'); });
+      r.addEventListener('pointerleave',()=>{ ev.textContent=''; r.removeAttribute('opacity'); }); }); });
+}
+
 function overviewHtml(l,admin){
   const st=STATUS[l.status]||{l:l.status};
   // 숫자만 넉 장 있으면 어느 것이 나쁜 상태인지 읽어야 안다. 아이콘 색으로
