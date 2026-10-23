@@ -430,14 +430,16 @@ const BRIEF_SEV={3:{l:'지금',c:'#C42B28',bg:'#FBE3E3'},2:{l:'오늘',c:'#B5730
 async function renderBrief(){
   const box=document.getElementById('brief'); if(!box) return;
   if(!state.brief) box.innerHTML='<div class="muted" style="margin:4px 0 10px">관내 요약을 불러오는 중…</div>';
-  let o; try{ o=await rpc('fleet_overview',{p_days:state.briefDays||7}); }
+  let o; try{ const rg=state.briefRange;
+    o = rg ? await rpc('fleet_overview_range',{p_from:rg.from+'T00:00:00+09:00', p_to:rpAddDays(rg.to,1)+'T00:00:00+09:00'})
+           : await rpc('fleet_overview',{p_days:state.briefDays||7}); }
   catch(e){ if(document.getElementById('brief')) box.innerHTML=`<div class="muted" style="margin:4px 0 10px">관내 요약을 불러오지 못했습니다: ${esc(e.message)}</div>`; return; }
   if(!document.getElementById('brief')) return;          // 받는 사이 화면이 바뀌었으면 버린다
   state.brief=o; drawBrief();
 }
 function drawBrief(){
   const box=document.getElementById('brief'), o=state.brief; if(!box||!o) return;
-  const t=o.totals||{}, acts=o.actions||[], rk=o.rankings||{}, days=o.days||7, open=state.briefOpen!==false;
+  const t=o.totals||{}, acts=o.actions||[], rk=o.rankings||{}, days=o.days||7, open=state.briefOpen!==false, rg=state.briefRange;
   const offline=(t.toilets||0)-(t.online||0);
   const tile=(l,v,s,cls)=>`<div class="etile ${cls||''}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s||''}</div></div>`;
   const row=(a,i)=>`<div class="brow"><span class="bsev" style="background:${BRIEF_SEV[a.severity].bg};color:${BRIEF_SEV[a.severity].c}">${BRIEF_KIND[a.kind]||esc(a.kind)}</span><span class="lnk" data-id="${a.location_id}">${esc(a.name)}</span><span class="bdet">${esc(a.detail)}${a.last_done?`<div class="muted" style="font-size:11px">지난번 처리 ${fmtDt(a.last_done.at)} ${esc(a.last_done.by||'')}${a.last_done.note?` · ${esc(a.last_done.note)}`:''}</div>`:''}</span><span class="muted bago">${a.since?usageAgo(a.since):''}</span><button class="chip sm bdone" data-done="${esc(a.location_id)}|${esc(a.kind)}">처리</button></div>`;
@@ -447,8 +449,11 @@ function drawBrief(){
       ${rs.length>lim.length?`<button class="chip sm" data-more>나머지 ${rs.length-lim.length}건 더 보기</button>`:''}</div>`; };
   const rank=(title,items,fmt)=>`<div class="ecard"><div class="eh"><b>${title}</b><span class="muted">${days}일</span></div>${items.length?`<div class="ulist">${items.map((r,i)=>`<div class="urow"><span class="muted" style="min-width:14px">${i+1}</span><span class="lnk" data-id="${r.id}" style="flex:1">${esc(r.name)}</span><b>${fmt(r)}</b></div>`).join('')}</div>`:`<div class="muted" style="padding:10px 2px 14px">기록 없음</div>`}</div>`;
   box.innerHTML=`<div class="brief">
-    <div class="uband" style="margin:2px 2px 10px"><b>관내 요약</b><span class="muted">${t.toilets||0}곳 · 최근 ${days}일${state.lastRef?' · 갱신 '+state.lastRef:''}</span>
-      <span class="rbar" style="margin-left:auto;display:flex;gap:6px"><button class="chip sm ${days===7?'on':''}" data-days="7">7일</button><button class="chip sm ${days===28?'on':''}" data-days="28">28일</button><button class="chip sm" data-report>월간 보고서</button><button class="chip sm" data-fold>${open?'접기':'펼치기'}</button></span></div>
+    <div class="uband" style="margin:2px 2px 10px"><b>관내 요약</b><span class="muted">${t.toilets||0}곳 · ${rg?`${rg.from} ~ ${rg.to} (${days}일)`:(days===1?'오늘':`최근 ${days}일`)}${state.lastRef?' · 갱신 '+state.lastRef:''}</span>
+      <span class="rbar" style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <button class="chip sm ${!rg&&days===1?'on':''}" data-days="1">오늘</button><button class="chip sm ${!rg&&days===7?'on':''}" data-days="7">7일</button><button class="chip sm ${!rg&&days===28?'on':''}" data-days="28">28일</button><button class="chip sm ${rg?'on':''}" data-range>기간</button>
+        ${state.briefRangeOpen?`<input type="date" id="br_from" value="${rg?rg.from:rpAddDays(rpIso(new Date()),-6)}" max="${rpIso(new Date())}" style="padding:4px 8px;font-size:13px"/><span class="muted">~</span><input type="date" id="br_to" value="${rg?rg.to:rpIso(new Date())}" max="${rpIso(new Date())}" style="padding:4px 8px;font-size:13px"/><button class="chip sm" data-range-go>적용</button>`:''}
+        <button class="chip sm" data-report>보고서</button><button class="chip sm" data-fold>${open?'접기':'펼치기'}</button></span></div>
     ${open?`<div class="etiles six">
       ${tile('화장실', `${t.toilets||0}곳`, `온라인 ${t.online||0} · 오프라인 ${offline}`, offline>0?'warn':'')}
       ${tile('이용', `${(+(t.uses||t.dispense||0)).toLocaleString()}회`, t.uses?`칸 센서 실측 · 지급 ${t.dispense||0}개`:`지급 기준(칸 센서 없음)`)}
@@ -471,7 +476,9 @@ function drawBrief(){
     </div>`:''}
   </div>`;
   box.querySelectorAll('.lnk[data-id]').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
-  box.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{ state.briefDays=+b.dataset.days; state.briefMore=false; renderBrief(); });
+  box.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{ state.briefDays=+b.dataset.days; state.briefRange=null; state.briefRangeOpen=false; state.briefMore=false; renderBrief(); });
+  const rb=box.querySelector('[data-range]'); if(rb) rb.onclick=()=>{ state.briefRangeOpen=!state.briefRangeOpen; drawBrief(); };
+  const rgo=box.querySelector('[data-range-go]'); if(rgo) rgo.onclick=()=>{ const f=box.querySelector('#br_from').value, t2=box.querySelector('#br_to').value; if(!f||!t2||f>t2){ alert('기간을 확인하세요(시작 ≤ 끝).'); return; } state.briefRange={from:f,to:t2}; state.briefRangeOpen=false; state.briefMore=false; renderBrief(); };
   const f=box.querySelector('[data-fold]'); if(f) f.onclick=()=>{ state.briefOpen=!open; try{ localStorage.setItem('briefOpen',String(!open)); }catch{} drawBrief(); };
   const m=box.querySelector('[data-more]'); if(m) m.onclick=()=>{ state.briefMore=true; drawBrief(); };
   const rp=box.querySelector('[data-report]'); if(rp) rp.onclick=openReportDialog;
@@ -505,22 +512,59 @@ async function actionLogDialog(){
     :'<div class="muted" style="padding:14px 2px">최근 30일에 처리 기록이 없습니다.</div>';
   bd.querySelectorAll('.lnk[data-id]').forEach(el=>el.onclick=()=>{ bd.remove(); openDetail(el.dataset.id); });
 }
-// ── 월간 보고서(2026-10-23) ──
-// 공무원이 달마다 내는 운영 보고: 그 달 + 지난달 비교 + 화장실별 표 + 눈에 띄는 곳. fleet_report RPC 한 번.
+// ── 운영 보고서(2026-10-23; 같은 날 오후 일간·주간·월간·기간 지정으로 일반화 — 사용자 "일별·주별·월별·기간 설정별 모두") ──
+// fleet_report_range(p_from, p_to) 한 번으로 이 기간 + 같은 길이의 직전 기간(비교) + 조치 처리 기록을 받는다.
 // 인쇄·PDF 는 새 창(브라우저 인쇄), 엑셀은 xlsx.js 로 두 시트. 숫자는 전부 집계값.
+const RP_KIND={day:'일간',week:'주간',month:'월간',range:'기간'};
+function rpIso(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function rpParse(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+function rpAddDays(s,n){ const d=rpParse(s); d.setDate(d.getDate()+n); return rpIso(d); }
+function rpWeekOf(s){ const d=rpParse(s); d.setDate(d.getDate()-((d.getDay()+6)%7)); const a=rpIso(d); return [a, rpAddDays(a,6)]; }   // 월~일
+function rpMonthKo(m){ const [y,mm]=m.split('-'); return `${y}년 ${+mm}월`; }
+function rpDateKo(s){ const [y,m,d]=s.split('-').map(Number); return `${y}년 ${m}월 ${d}일`; }
+// 보고서 제목에 쓰는 기간 글 — 종류마다 자연스럽게
+function rpTitle(r){ const k=r.kind||'range';
+  if(k==='day') return rpDateKo(r.from);
+  if(k==='month') return rpMonthKo(r.from.slice(0,7));
+  if(k==='week') return `${rpDateKo(r.from)} ~ ${r.to_incl.slice(5).replace('-','월 ')}일 (주간)`;
+  return `${r.from} ~ ${r.to_incl} (${r.days}일)`; }
+function rpDelta(c,p){ if(c==null||p==null) return ''; const d=+c-+p; if(!d) return '±0'; const pct=+p?` (${d>0?'+':''}${Math.round(100*d/+p)}%)`:''; const v=Number.isInteger(+c)&&Number.isInteger(+p)?Math.round(d):Math.round(d*10)/10; return `${d>0?'+':''}${v}${pct}`; }
+
 function openReportDialog(){
-  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); const def=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  const bd=modalEl(`<h2 style="margin:0 0 6px">월간 운영 보고서</h2>
-    <div class="muted" style="font-size:13px;margin-bottom:12px">관내 화장실 전체의 한 달 운영 수치를 지난달과 비교해 보고서로 만듭니다. 인쇄(PDF)와 엑셀 두 가지.</div>
-    <div class="fsec">보고 대상 달</div>
-    <div class="grid2"><div><label class="f">달</label><input id="rp_month" type="month" value="${def}" max="${new Date().toISOString().slice(0,7)}"/></div>
-      <div><label class="f">&nbsp;</label><div class="muted" style="font-size:12px;padding-top:8px">이번 달을 고르면 오늘까지의 중간 집계입니다.</div></div></div>
+  const today=rpIso(new Date()), yest=rpAddDays(today,-1), lastWeek=rpWeekOf(rpAddDays(today,-7))[0];
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); const lastMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const bd=modalEl(`<h2 style="margin:0 0 6px">운영 보고서</h2>
+    <div class="muted" style="font-size:13px;margin-bottom:12px">관내 화장실 전체의 운영 수치를 같은 길이의 직전 기간과 비교해 보고서로 만듭니다. 인쇄(PDF)와 엑셀 두 가지.</div>
+    <div class="fsec">보고 기간</div>
+    <div class="rbar" style="margin-bottom:10px">${Object.entries(RP_KIND).map(([k,l])=>`<button class="chip sm" data-kind="${k}">${l}</button>`).join('')}</div>
+    <div class="grid2">
+      <div data-for="day"><label class="f">날짜</label><input id="rp_day" type="date" value="${yest}" max="${today}"/></div>
+      <div data-for="week"><label class="f">그 주의 아무 날짜(월~일 한 주)</label><input id="rp_week" type="date" value="${lastWeek}" max="${today}"/></div>
+      <div data-for="month"><label class="f">달</label><input id="rp_month" type="month" value="${lastMonth}" max="${today.slice(0,7)}"/></div>
+      <div data-for="range"><label class="f">시작</label><input id="rp_from" type="date" value="${rpAddDays(today,-29)}" max="${today}"/></div>
+      <div data-for="range"><label class="f">끝</label><input id="rp_to" type="date" value="${today}" max="${today}"/></div>
+      <div style="grid-column:1/-1" class="muted" id="rp_hint"></div></div>
     <div id="rp_msg" style="min-height:22px;margin-top:12px;font-size:13px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
       <button class="btn line" data-x>닫기</button><button class="btn line" data-xlsx>엑셀 저장</button><button class="btn" data-print>보고서 열기(인쇄·PDF)</button></div>`);
+  let kind='month';
+  const val=k=>bd.querySelector('#rp_'+k).value;
+  const period=()=>{
+    if(kind==='day') return val('day')?{from:val('day'),to:val('day')}:null;
+    if(kind==='week'){ if(!val('week')) return null; const [a,b]=rpWeekOf(val('week')); return {from:a,to:b}; }
+    if(kind==='month'){ const m=val('month'); if(!m) return null; const [y,mm]=m.split('-').map(Number); return {from:`${m}-01`,to:`${m}-${String(new Date(y,mm,0).getDate()).padStart(2,'0')}`}; }
+    return val('from')&&val('to')&&val('from')<=val('to')?{from:val('from'),to:val('to')}:null; };
+  const show=()=>{ bd.querySelectorAll('[data-for]').forEach(el=>el.style.display=el.dataset.for===kind?'':'none');
+    bd.querySelectorAll('[data-kind]').forEach(b=>b.classList.toggle('on',b.dataset.kind===kind));
+    const p=period(); bd.querySelector('#rp_hint').textContent=p?`${p.from} ~ ${p.to}${p.to>=today?' · 오늘 포함 — 중간 집계':''} · 비교 대상: 같은 길이의 직전 기간`:'기간을 확인하세요(시작 ≤ 끝, 최대 366일).'; };
+  bd.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{ kind=b.dataset.kind; show(); });
+  bd.querySelectorAll('input').forEach(i=>i.oninput=show);
+  show();
   bd.querySelector('[data-x]').onclick=()=>bd.remove();
-  const load=async()=>{ const m=bd.querySelector('#rp_month').value; const msg=bd.querySelector('#rp_msg'); msg.textContent='집계 중…';
-    try{ const r=await rpc('fleet_report',{p_month:m||null}); msg.textContent=''; return r; }catch(e){ msg.innerHTML=`<span class="err">만들지 못했습니다: ${esc(e.message)}</span>`; return null; } };
+  const load=async()=>{ const p=period(); const msg=bd.querySelector('#rp_msg'); if(!p){ msg.innerHTML='<span class="err">기간을 확인하세요.</span>'; return null; }
+    msg.textContent='집계 중…';
+    try{ const r=await rpc('fleet_report_range',{p_from:p.from,p_to:p.to}); r.kind=kind; msg.textContent=''; return r; }
+    catch(e){ msg.innerHTML=`<span class="err">만들지 못했습니다: ${esc(e.message)}</span>`; return null; } };
   bd.querySelector('[data-print]').onclick=async()=>{ const w=window.open('','_blank'); if(!w){ bd.querySelector('#rp_msg').innerHTML='<span class="err">새 창이 막혔습니다. 팝업 차단을 풀어 주세요.</span>'; return; }
     const r=await load(); if(!r){ w.close(); return; } w.document.open(); w.document.write(reportHtml(r)); w.document.close(); };
   bd.querySelector('[data-xlsx]').onclick=async()=>{ const r=await load(); if(r) reportXlsx(r); };
@@ -530,14 +574,10 @@ const RP_ROWS=[ // [제목, 값 뽑기(totals), 단위]
   ['민원 접수', t=>t.complaints, '건'], ['민원 처리', t=>t.complaints_done, '건'], ['민원 평균 처리 시간', t=>t.complaint_hours, '시간'],
   ['청소', t=>t.cleanings, '회'], ['만족도', t=>t.rating==null?null:+(+t.rating).toFixed(2), '점'], ['만족도 응답', t=>t.responses, '건'], ['1~2점 응답', t=>t.responses_low, '건'],
   ['장시간 재실', t=>t.long_stay, '회'], ['악취 나쁨', t=>t.nh3_bad_min==null?null:Math.round(t.nh3_bad_min/60*10)/10, '시간'], ['쾌적 비율', t=>t.comfort_pct, '%'],
-  ['지급기 고장·실패', t=>t.dispense_faults, '회'], ['문 점검 신호', t=>t.door_fault, '회'], ['보드 재시작', t=>t.board_resets, '회'] ];
-function rpDelta(c,p){ if(c==null||p==null) return ''; const d=+c-+p; if(!d) return '±0'; const pct=+p?` (${d>0?'+':''}${Math.round(100*d/+p)}%)`:''; const v=Number.isInteger(+c)&&Number.isInteger(+p)?Math.round(d):Math.round(d*10)/10; return `${d>0?'+':''}${v}${pct}`; }
-function rpEndDate(to){ const d=new Date(to+'T00:00:00'); d.setDate(d.getDate()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-function rpMonthKo(m){ const [y,mm]=m.split('-'); return `${y}년 ${+mm}월`; }
-function rpPrevMonth(m){ const [y,mm]=m.split('-').map(Number); const d=new Date(y,mm-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+  ['지급기 고장·실패', t=>t.dispense_faults, '회'], ['문 점검 신호', t=>t.door_fault, '회'], ['보드 재시작', t=>t.board_resets, '회'], ['조치 처리', t=>t.actions_done, '건'] ];
 function reportHtml(r){
   const c=r.cur||{}, t=c.totals||{}, pt=(r.prev||{}).totals||{}, L=c.locations||[], PL=new Map(((r.prev||{}).locations||[]).map(x=>[x.id,x])), rk=c.rankings||{};
-  const orgs=(r.org_names||[]).filter(Boolean).join(', ')||'관내';
+  const orgs=(r.org_names||[]).filter(Boolean).join(', ')||'관내', kindKo=RP_KIND[r.kind]||'기간';
   const useBasis=t.uses>0;
   const fmt=v=>v==null?'-':(typeof v==='number'?v.toLocaleString():v);
   const sumRows=RP_ROWS.filter(([n])=>useBasis||n!=='이용(칸 센서 실측)').map(([n,f,u])=>{ const cv=f(t), pv=f(pt); return `<tr><td>${n}</td><td class="n">${fmt(cv)}${cv==null?'':u}</td><td class="n">${fmt(pv)}${pv==null?'':u}</td><td class="n">${rpDelta(cv,pv)}</td></tr>`; }).join('');
@@ -549,7 +589,8 @@ function reportHtml(r){
       <td class="n">${(l.dispense_faults||0)+(l.door_fault||0)+(l.board_resets||0)}</td></tr>`; }).join('');
   const top=(title,items,f)=>`<div class="rk"><b>${title}</b>${items.length?`<ol>${items.map(x=>`<li>${esc(x.name)} <span>${f(x)}</span></li>`).join('')}</ol>`:'<div class="s">해당 없음</div>'}</div>`;
   const gen=new Date(r.generated_at||Date.now());
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(orgs)} 공중화장실 운영 보고서 ${esc(rpMonthKo(r.month))}</title>
+  const prevLabel=r.prev_from&&r.prev_to_incl?(r.prev_from===r.prev_to_incl?r.prev_from:`${r.prev_from} ~ ${r.prev_to_incl}`):'직전 기간';
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서 ${esc(rpTitle(r))}</title>
   <style>
     body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;color:#1B2540;background:#EEF1F6;font-size:12px}
     .bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #DDE3EE;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px}
@@ -564,14 +605,14 @@ function reportHtml(r){
     .warn{display:inline-block;background:#FCEFD6;color:#B5730A;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px}
     @page{size:A4;margin:0} @media print{.bar{display:none} body{background:#fff} .page{margin:0;width:auto;min-height:auto}}
   </style></head><body>
-  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpMonthKo(r.month))} · 화장실 ${t.toilets||0}곳</span></div>
+  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpTitle(r))} · 화장실 ${t.toilets||0}곳</span></div>
   <div class="page">
-    <h1>${esc(orgs)} 공중화장실 운영 월간 보고서</h1>
-    <div class="sub"><b>${esc(rpMonthKo(r.month))}</b> (${esc(r.from)} ~ ${esc(rpEndDate(r.to))})${r.partial?'<span class="warn">진행 중인 달 — 오늘까지 중간 집계</span>':''} · 비교: ${esc(rpMonthKo(rpPrevMonth(r.month)))} · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()} · 케어ON 운영 콘솔 자동 생성</div>
-    <h2>1. 한 달 요약</h2>
-    <table><thead><tr><th>항목</th><th class="n">${esc(rpMonthKo(r.month))}</th><th class="n">지난달</th><th class="n">증감</th></tr></thead><tbody>${sumRows}</tbody></table>
+    <h1>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서</h1>
+    <div class="sub"><b>${esc(rpTitle(r))}</b> (${esc(r.from)} ~ ${esc(r.to_incl)})${r.partial?'<span class="warn">오늘 포함 — 중간 집계</span>':''} · 비교: 직전 ${r.days}일(${esc(prevLabel)}) · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()} · 케어ON 운영 콘솔 자동 생성</div>
+    <h2>1. 요약</h2>
+    <table><thead><tr><th>항목</th><th class="n">이 기간</th><th class="n">직전 기간</th><th class="n">증감</th></tr></thead><tbody>${sumRows}</tbody></table>
     <h2>2. 화장실별 현황</h2>
-    <table><thead><tr><th class="n">#</th><th>화장실</th><th class="n">${useBasis?'이용(회)':'지급(개)'}<div class="s">지난달 대비</div></th>${useBasis?'<th class="n">지급(개)</th>':''}<th class="n">민원<div class="s">접수/처리</div></th><th class="n">청소(회)<div class="s">청소한 날</div></th><th class="n">만족도<div class="s">응답</div></th><th class="n">장시간<div class="s">재실</div></th><th class="n">악취<div class="s">나쁨 시간</div></th><th class="n">쾌적<div class="s">비율</div></th><th class="n">기기<div class="s">장애</div></th></tr></thead>
+    <table><thead><tr><th class="n">#</th><th>화장실</th><th class="n">${useBasis?'이용(회)':'지급(개)'}<div class="s">직전 기간 대비</div></th>${useBasis?'<th class="n">지급(개)</th>':''}<th class="n">민원<div class="s">접수/처리</div></th><th class="n">청소(회)<div class="s">청소한 날</div></th><th class="n">만족도<div class="s">응답</div></th><th class="n">장시간<div class="s">재실</div></th><th class="n">악취<div class="s">나쁨 시간</div></th><th class="n">쾌적<div class="s">비율</div></th><th class="n">기기<div class="s">장애</div></th></tr></thead>
       <tbody>${locRows||'<tr><td colspan="11">화장실이 없습니다.</td></tr>'}</tbody></table>
     <h2>3. 눈에 띄는 곳</h2>
     <div class="rks">
@@ -583,20 +624,22 @@ function reportHtml(r){
     <h2>4. 조치 처리 기록 <span class="s" style="font-weight:400">${(r.actions_done||[]).length}건</span></h2>
     ${(r.actions_done||[]).length?`<table><thead><tr><th>일시</th><th>화장실</th><th>항목</th><th>당시 상태</th><th>처리자</th><th>메모</th></tr></thead><tbody>
       ${(r.actions_done||[]).map(g=>`<tr><td style="white-space:nowrap">${fmtDt(g.done_at)}</td><td>${esc(g.name)}</td><td>${BRIEF_KIND[g.kind]||esc(g.kind)}</td><td>${esc(g.detail||'')}</td><td>${esc(g.done_by_name||'')}</td><td>${esc(g.note||'')}</td></tr>`).join('')}</tbody></table>`
-      :'<div class="s">이 달에 처리 기록이 없습니다.</div>'}
-    <div class="note">기준 — 이용: 칸 문 센서가 있는 곳은 문이 닫혔다 열린 사이클(20초 미만 제외)을 센 실측, 없는 곳은 생리용품 지급 수로 대신함. 민원 평균 처리 시간: 접수부터 처리 완료까지. 청소: 키오스크 청소 기록. 만족도: 키오스크 5점 응답. 장시간 재실: 한 칸이 30분 넘게 닫혀 있던 경우. 악취 나쁨: 암모니아 1.0 ppm 이상이었던 시간. 쾌적 비율: 온도 14~29°C·습도 70% 이하·암모니아 0.5 ppm 미만·PM2.5 35 이하를 모두 만족한 측정의 비율. 기기 장애: 지급기 고장·실패, 문 점검 신호, 보드 재시작의 합. 모든 수치는 집계값이며 개인정보를 담지 않습니다.</div>
+      :'<div class="s">이 기간에 처리 기록이 없습니다.</div>'}
+    <div class="note">기준 — 이용: 칸 문 센서가 있는 곳은 문이 닫혔다 열린 사이클(20초 미만 제외)을 센 실측, 없는 곳은 생리용품 지급 수로 대신함. 민원 평균 처리 시간: 접수부터 처리 완료까지. 청소: 키오스크 청소 기록. 만족도: 키오스크 5점 응답. 장시간 재실: 한 칸이 30분 넘게 닫혀 있던 경우. 악취 나쁨: 암모니아 1.0 ppm 이상이었던 시간. 쾌적 비율: 온도 14~29°C·습도 70% 이하·암모니아 0.5 ppm 미만·PM2.5 35 이하를 모두 만족한 측정의 비율. 기기 장애: 지급기 고장·실패, 문 점검 신호, 보드 재시작의 합. 조치 처리: 운영 콘솔에서 담당자가 "처리" 로 기록한 건. 직전 기간: 이 기간과 같은 길이의 바로 앞 기간. 모든 수치는 집계값이며 개인정보를 담지 않습니다.</div>
   </div></body></html>`;
 }
 function reportXlsx(r){
   const c=r.cur||{}, t=c.totals||{}, pt=(r.prev||{}).totals||{}, L=c.locations||[], PL=new Map(((r.prev||{}).locations||[]).map(x=>[x.id,x]));
   const useBasis=t.uses>0;
   const wb=XLSX.utils.book_new();
-  const sum=[['항목',rpMonthKo(r.month),'지난달','증감'],...RP_ROWS.filter(([n])=>useBasis||n!=='이용(칸 센서 실측)').map(([n,f,u])=>{ const cv=f(t), pv=f(pt); return [n+(u?`(${u})`:''), cv==null?'':cv, pv==null?'':pv, rpDelta(cv,pv)]; })];
-  const ws1=XLSX.utils.aoa_to_sheet(sum); ws1['!cols']=[{wch:22},{wch:14},{wch:14},{wch:14}]; XLSX.utils.book_append_sheet(wb,ws1,'요약');
-  const rows=[['코드','화장실','소속','이용(회)','지난달 이용','지급(개)','지급 실패','민원 접수','민원 처리','평균 처리 시간(h)','청소(회)','청소한 날','만족도','응답','1~2점','장시간 재실','문 점검','지급기 고장','보드 재시작','악취 나쁨(분)','쾌적 비율(%)','체류 중앙값(초)','현재 재고','재고 상한','미처리 민원'],
+  const sum=[['항목',`이 기간 (${r.from}~${r.to_incl})`,`직전 기간 (${r.prev_from}~${r.prev_to_incl})`,'증감'],...RP_ROWS.filter(([n])=>useBasis||n!=='이용(칸 센서 실측)').map(([n,f,u])=>{ const cv=f(t), pv=f(pt); return [n+(u?`(${u})`:''), cv==null?'':cv, pv==null?'':pv, rpDelta(cv,pv)]; })];
+  const ws1=XLSX.utils.aoa_to_sheet(sum); ws1['!cols']=[{wch:22},{wch:24},{wch:24},{wch:14}]; XLSX.utils.book_append_sheet(wb,ws1,'요약');
+  const rows=[['코드','화장실','소속','이용(회)','직전 기간 이용','지급(개)','지급 실패','민원 접수','민원 처리','평균 처리 시간(h)','청소(회)','청소한 날','만족도','응답','1~2점','장시간 재실','문 점검','지급기 고장','보드 재시작','악취 나쁨(분)','쾌적 비율(%)','체류 중앙값(초)','현재 재고','재고 상한','미처리 민원'],
     ...L.map(l=>{ const p=PL.get(l.id)||{}; return [l.code,l.name,l.org_name,l.uses,p.uses??'',l.dispense,l.dispense_failed,l.complaints,l.complaints_done,l.complaint_hours??'',l.cleanings,l.cleaning_days,l.rating??'',l.responses,l.responses_low,l.long_stay,l.door_fault,l.dispense_faults,l.board_resets,l.nh3_bad_min,l.comfort_pct??'',l.dwell_med_sec??'',l.pad_qty??'',l.pad_cap??'',l.open_complaints]; })];
   const ws2=XLSX.utils.aoa_to_sheet(rows); ws2['!cols']=[{wch:10},{wch:24},{wch:12},...Array(22).fill({wch:11})]; XLSX.utils.book_append_sheet(wb,ws2,'화장실별');
-  XLSX.writeFile(wb,`공중화장실_운영보고서_${r.month}.xlsx`);
+  const acts=[['일시','화장실','항목','당시 상태','처리자','메모'],...(r.actions_done||[]).map(g=>[fmtDateTime(g.done_at),g.name,BRIEF_KIND[g.kind]||g.kind,g.detail||'',g.done_by_name||'',g.note||''])];
+  const ws3=XLSX.utils.aoa_to_sheet(acts); ws3['!cols']=[{wch:14},{wch:24},{wch:14},{wch:30},{wch:10},{wch:40}]; XLSX.utils.book_append_sheet(wb,ws3,'조치 처리');
+  XLSX.writeFile(wb,`공중화장실_운영보고서_${RP_KIND[r.kind]||'기간'}_${r.from}_${r.to_incl}.xlsx`);
 }
 function renderStats(){
   const L=state.locs.filter(l=>!l.deleted);
