@@ -592,10 +592,16 @@ function reportHtml(r){
   const prevLabel=r.prev_from&&r.prev_to_incl?(r.prev_from===r.prev_to_incl?r.prev_from:`${r.prev_from} ~ ${r.prev_to_incl}`):'직전 기간';
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서 ${esc(rpTitle(r))}</title>
   <style>
-    body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;color:#1B2540;background:#EEF1F6;font-size:12px}
-    .bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #DDE3EE;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px}
-    .bar button{border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;background:#4353E0;color:#fff}
-    .page{width:190mm;margin:8mm auto;background:#fff;padding:12mm 14mm;box-sizing:border-box;min-height:277mm}
+    /* A4 전용(2026-10-23 사용자 "보고서 출력이 A4 로 되어야 해"): 용지·여백은 @page 가 정하고, 화면 미리보기도 같은 210mm 폭으로 보인다.
+       표 행·제목·구역은 쪽 사이에서 잘리지 않게 하고, 표 머리글은 쪽마다 반복, 배경색은 인쇄 설정과 무관하게 찍는다. 바닥글은 position:fixed 로 쪽마다 반복. */
+    body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;color:#1B2540;background:#EEF1F6;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #DDE3EE;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px;z-index:2}
+    .bar button{border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;background:#4353E0;color:#fff} .bar .tip{color:#6B7590;font-size:12px;margin-left:auto}
+    .page{width:210mm;margin:8mm auto;background:#fff;padding:14mm 14mm 18mm;box-sizing:border-box;min-height:297mm}
+    .sec{break-inside:avoid;page-break-inside:avoid} h2{break-after:avoid;page-break-after:avoid} tr{break-inside:avoid;page-break-inside:avoid} thead{display:table-header-group}
+    /* 바닥글: 문서 전체를 표 하나로 감싸고 tfoot 에 두면 크로미엄이 쪽마다 반복해 찍는다(position:fixed 는 헤드리스 인쇄에서 2쪽 머리에 겹침, 10-23 확인) */
+    table.sheet{width:100%;border-collapse:collapse} table.sheet>tbody>tr>td,table.sheet>tfoot>tr>td{border:0;padding:0}
+    table.sheet>tfoot{display:table-footer-group} .foot{display:none;font-size:9.5px;color:#6B7590;justify-content:space-between;padding-top:6px;border-top:1px solid #E5E9F2;margin-top:8px}
     h1{font-size:20px;margin:0 0 4px} .sub{color:#4A5468;font-size:12px;margin-bottom:14px} .sub b{color:#1B2540}
     h2{font-size:14px;margin:18px 0 8px;padding-left:8px;border-left:4px solid #2A78D6}
     table{width:100%;border-collapse:collapse;font-size:11.5px} th,td{border:1px solid #D6DCEC;padding:5px 7px;vertical-align:top} th{background:#F3F6FB;font-weight:700;text-align:left}
@@ -603,10 +609,12 @@ function reportHtml(r){
     .rks{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px} .rk b{display:block;margin-bottom:3px} .rk ol{margin:0;padding-left:18px} .rk li span{color:#4A5468;float:right}
     .note{color:#4A5468;font-size:10.5px;line-height:1.5;margin-top:14px;border-top:1px solid #E5E9F2;padding-top:8px}
     .warn{display:inline-block;background:#FCEFD6;color:#B5730A;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px}
-    @page{size:A4;margin:0} @media print{.bar{display:none} body{background:#fff} .page{margin:0;width:auto;min-height:auto}}
+    @page{size:A4 portrait;margin:14mm 14mm 18mm}
+    @media print{.bar{display:none} body{background:#fff} .page{margin:0;width:auto;padding:0;min-height:auto}
+      .foot{display:flex}}
   </style></head><body>
-  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpTitle(r))} · 화장실 ${t.toilets||0}곳</span></div>
-  <div class="page">
+  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpTitle(r))} · 화장실 ${t.toilets||0}곳</span><span class="tip">A4 세로 · 인쇄 창에서 "대상: PDF 로 저장" 을 고르면 파일로 저장됩니다</span></div>
+  <div class="page"><table class="sheet"><tfoot><tr><td><div class="foot"><span>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서 · ${esc(rpTitle(r))}</span><span>케어ON 운영 콘솔 · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()}</span></div></td></tr></tfoot><tbody><tr><td>
     <h1>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서</h1>
     <div class="sub"><b>${esc(rpTitle(r))}</b> (${esc(r.from)} ~ ${esc(r.to_incl)})${r.partial?'<span class="warn">오늘 포함 — 중간 집계</span>':''} · 비교: 직전 ${r.days}일(${esc(prevLabel)}) · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()} · 케어ON 운영 콘솔 자동 생성</div>
     <h2>1. 요약</h2>
@@ -614,19 +622,19 @@ function reportHtml(r){
     <h2>2. 화장실별 현황</h2>
     <table><thead><tr><th class="n">#</th><th>화장실</th><th class="n">${useBasis?'이용(회)':'지급(개)'}<div class="s">직전 기간 대비</div></th>${useBasis?'<th class="n">지급(개)</th>':''}<th class="n">민원<div class="s">접수/처리</div></th><th class="n">청소(회)<div class="s">청소한 날</div></th><th class="n">만족도<div class="s">응답</div></th><th class="n">장시간<div class="s">재실</div></th><th class="n">악취<div class="s">나쁨 시간</div></th><th class="n">쾌적<div class="s">비율</div></th><th class="n">기기<div class="s">장애</div></th></tr></thead>
       <tbody>${locRows||'<tr><td colspan="11">화장실이 없습니다.</td></tr>'}</tbody></table>
-    <h2>3. 눈에 띄는 곳</h2>
+    <div class="sec"><h2>3. 눈에 띄는 곳</h2>
     <div class="rks">
       ${top(useBasis?'이용 많은 곳':'지급 많은 곳', rk.busiest||[], x=>`${x.v}${useBasis?'회':'개'}`)}
       ${top('민원 많은 곳', rk.complaints||[], x=>`${x.v}건`)}
       ${top('만족도 낮은 곳(응답 3건 이상)', rk.rating_low||[], x=>`${(+x.v).toFixed(1)}점 · ${x.n}건`)}
       ${top('장시간 재실 발생', rk.long_stay||[], x=>`${x.v}회`)}
-    </div>
+    </div></div>
     <h2>4. 조치 처리 기록 <span class="s" style="font-weight:400">${(r.actions_done||[]).length}건</span></h2>
     ${(r.actions_done||[]).length?`<table><thead><tr><th>일시</th><th>화장실</th><th>항목</th><th>당시 상태</th><th>처리자</th><th>메모</th></tr></thead><tbody>
       ${(r.actions_done||[]).map(g=>`<tr><td style="white-space:nowrap">${fmtDt(g.done_at)}</td><td>${esc(g.name)}</td><td>${BRIEF_KIND[g.kind]||esc(g.kind)}</td><td>${esc(g.detail||'')}</td><td>${esc(g.done_by_name||'')}</td><td>${esc(g.note||'')}</td></tr>`).join('')}</tbody></table>`
       :'<div class="s">이 기간에 처리 기록이 없습니다.</div>'}
-    <div class="note">기준 — 이용: 칸 문 센서가 있는 곳은 문이 닫혔다 열린 사이클(20초 미만 제외)을 센 실측, 없는 곳은 생리용품 지급 수로 대신함. 민원 평균 처리 시간: 접수부터 처리 완료까지. 청소: 키오스크 청소 기록. 만족도: 키오스크 5점 응답. 장시간 재실: 한 칸이 30분 넘게 닫혀 있던 경우. 악취 나쁨: 암모니아 1.0 ppm 이상이었던 시간. 쾌적 비율: 온도 14~29°C·습도 70% 이하·암모니아 0.5 ppm 미만·PM2.5 35 이하를 모두 만족한 측정의 비율. 기기 장애: 지급기 고장·실패, 문 점검 신호, 보드 재시작의 합. 조치 처리: 운영 콘솔에서 담당자가 "처리" 로 기록한 건. 직전 기간: 이 기간과 같은 길이의 바로 앞 기간. 모든 수치는 집계값이며 개인정보를 담지 않습니다.</div>
-  </div></body></html>`;
+    <div class="note sec">기준 — 이용: 칸 문 센서가 있는 곳은 문이 닫혔다 열린 사이클(20초 미만 제외)을 센 실측, 없는 곳은 생리용품 지급 수로 대신함. 민원 평균 처리 시간: 접수부터 처리 완료까지. 청소: 키오스크 청소 기록. 만족도: 키오스크 5점 응답. 장시간 재실: 한 칸이 30분 넘게 닫혀 있던 경우. 악취 나쁨: 암모니아 1.0 ppm 이상이었던 시간. 쾌적 비율: 온도 14~29°C·습도 70% 이하·암모니아 0.5 ppm 미만·PM2.5 35 이하를 모두 만족한 측정의 비율. 기기 장애: 지급기 고장·실패, 문 점검 신호, 보드 재시작의 합. 조치 처리: 운영 콘솔에서 담당자가 "처리" 로 기록한 건. 직전 기간: 이 기간과 같은 길이의 바로 앞 기간. 모든 수치는 집계값이며 개인정보를 담지 않습니다.</div>
+  </td></tr></tbody></table></div></body></html>`;
 }
 function reportXlsx(r){
   const c=r.cur||{}, t=c.totals||{}, pt=(r.prev||{}).totals||{}, L=c.locations||[], PL=new Map(((r.prev||{}).locations||[]).map(x=>[x.id,x]));
