@@ -123,6 +123,20 @@
   .ugrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .uband { display:flex; align-items:baseline; gap:10px; margin:18px 2px 8px; padding-left:10px; border-left:4px solid #2A78D6; font-size:15px; color:#1F2C48; }
   .uband .muted { font-size:12px; }
+  .brief { margin-bottom:16px; }
+  .etiles.six { grid-template-columns:repeat(6,1fr); }
+  .bgrid { display:grid; grid-template-columns:3fr 2fr; gap:12px; }
+  .brank { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-content:start; }
+  .bgroup { margin:6px 0 10px; }
+  .bgh { display:flex; align-items:baseline; gap:8px; font-size:13px; margin:6px 2px 4px; }
+  .brow { display:flex; align-items:center; gap:10px; padding:7px 4px; border-top:1px solid #EEF1F6; font-size:13px; color:#36405A; }
+  .brow .bsev { flex:none; min-width:98px; box-sizing:border-box; text-align:center; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; }
+  .brow .lnk { flex:none; min-width:160px; }
+  .brow .bdet { flex:1; }
+  .brow .bago { flex:none; font-size:12px; min-width:56px; text-align:right; }
+  .brow .bdone { flex:none; padding:3px 9px; font-size:12px; }
+  .modal.wide { width:980px; }
+  @media (max-width:1100px){ .etiles.six { grid-template-columns:repeat(3,1fr); } .bgrid { grid-template-columns:1fr; } }
   .ulist { display:flex; flex-direction:column; gap:6px; padding:4px 2px; }
   .urow { display:flex; align-items:center; gap:10px; font-size:13px; color:#36405A; }
   .etile.warn { border-color:#F0D9A8; } .etile.bad { border-color:#F3B9B9; }
@@ -309,8 +323,9 @@ async function renderDashboard(){
   mountShell(); state.filters=defFilters(); state.page=1;
   const body=document.getElementById('body'); body.innerHTML='<div class="muted">불러오는 중…</div>';
   try{ state.locs=await rpc('fleet_locations'); }catch(e){ body.innerHTML=`<div class="err">조회 실패: ${esc(e.message)}</div>`; return; }
-  body.innerHTML=`<div id="filters"></div><div id="stats"></div><div id="table"></div>`;
-  renderFilters(); renderAll();
+  body.innerHTML=`<div id="brief"></div><div id="filters"></div><div id="stats"></div><div id="table"></div>`;
+  try{ state.briefOpen=localStorage.getItem('briefOpen')!=='false'; }catch{ state.briefOpen=true; }
+  renderFilters(); renderAll(); renderBrief();
 }
 // ── 자동 갱신 ──
 // 켜 둔 화면이 옛 상태로 남는 문제(2026-09-06: 앱 2.1.20 배포·기기 복귀가 화면엔
@@ -326,7 +341,7 @@ async function refreshFleet(){
   state.locs=locs; state.lastRef=fmtDt(new Date().toISOString()).slice(6);
   const fl=document.getElementById('filters');
   if(fl && !fl.contains(document.activeElement)) renderFilters();
-  renderAll();
+  renderAll(); renderBrief();
 }
 setInterval(()=>{ if(!document.hidden) refreshFleet(); }, REFRESH_MS);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshFleet(); });
@@ -407,6 +422,182 @@ function applyFilters(){
 }
 function renderAll(){ renderStats(); renderTable(); }
 
+// ── 관내 요약(2026-10-23, 사용자 "공무원에게 필요한 정보를 제공해야 해 — 만들자") ──
+// 담당 공무원이 아침에 보는 한 화면: 관내 합계 → 오늘 조치 필요 목록(지금·오늘·이번 주) → 순위.
+// 숫자는 fleet_overview RPC(권한 범위 안의 화장실만). 화장실마다 들어가 보는 "이용 현황" 은 근거 자료, 여기는 할 일.
+const BRIEF_KIND={long_stay:'장시간 재실',offline:'오프라인',never_seen:'미접속',complaint_overdue:'민원 기한 초과',complaint_open:'미처리 민원',stock_low:'재고 부족',no_cleaning:'청소 안 됨',nh3_bad:'악취',door_fault:'문 점검',dispense_fault:'지급 고장',sensor_stale:'센서 안 들림',sensor_battery:'센서 전지',maintenance:'유지보수 만료',rating_low:'만족도 낮음'};
+const BRIEF_SEV={3:{l:'지금',c:'#C42B28',bg:'#FBE3E3'},2:{l:'오늘',c:'#B5730A',bg:'#FCEFD6'},1:{l:'이번 주',c:'#2C6CD0',bg:'#E3EDFB'}};
+async function renderBrief(){
+  const box=document.getElementById('brief'); if(!box) return;
+  if(!state.brief) box.innerHTML='<div class="muted" style="margin:4px 0 10px">관내 요약을 불러오는 중…</div>';
+  let o; try{ o=await rpc('fleet_overview',{p_days:state.briefDays||7}); }
+  catch(e){ if(document.getElementById('brief')) box.innerHTML=`<div class="muted" style="margin:4px 0 10px">관내 요약을 불러오지 못했습니다: ${esc(e.message)}</div>`; return; }
+  if(!document.getElementById('brief')) return;          // 받는 사이 화면이 바뀌었으면 버린다
+  state.brief=o; drawBrief();
+}
+function drawBrief(){
+  const box=document.getElementById('brief'), o=state.brief; if(!box||!o) return;
+  const t=o.totals||{}, acts=o.actions||[], rk=o.rankings||{}, days=o.days||7, open=state.briefOpen!==false;
+  const offline=(t.toilets||0)-(t.online||0);
+  const tile=(l,v,s,cls)=>`<div class="etile ${cls||''}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s||''}</div></div>`;
+  const row=(a,i)=>`<div class="brow"><span class="bsev" style="background:${BRIEF_SEV[a.severity].bg};color:${BRIEF_SEV[a.severity].c}">${BRIEF_KIND[a.kind]||esc(a.kind)}</span><span class="lnk" data-id="${a.location_id}">${esc(a.name)}</span><span class="bdet">${esc(a.detail)}${a.last_done?`<div class="muted" style="font-size:11px">지난번 처리 ${fmtDt(a.last_done.at)} ${esc(a.last_done.by||'')}${a.last_done.note?` · ${esc(a.last_done.note)}`:''}</div>`:''}</span><span class="muted bago">${a.since?usageAgo(a.since):''}</span><button class="chip sm bdone" data-done="${esc(a.location_id)}|${esc(a.kind)}">처리</button></div>`;
+  const group=sev=>{ const rs=acts.filter(a=>a.severity===sev); if(!rs.length) return '';
+    const lim=state.briefMore?rs:rs.slice(0,6);
+    return `<div class="bgroup"><div class="bgh"><b style="color:${BRIEF_SEV[sev].c}">${BRIEF_SEV[sev].l}</b><span class="muted">${rs.length}건</span></div>${lim.map(row).join('')}
+      ${rs.length>lim.length?`<button class="chip sm" data-more>나머지 ${rs.length-lim.length}건 더 보기</button>`:''}</div>`; };
+  const rank=(title,items,fmt)=>`<div class="ecard"><div class="eh"><b>${title}</b><span class="muted">${days}일</span></div>${items.length?`<div class="ulist">${items.map((r,i)=>`<div class="urow"><span class="muted" style="min-width:14px">${i+1}</span><span class="lnk" data-id="${r.id}" style="flex:1">${esc(r.name)}</span><b>${fmt(r)}</b></div>`).join('')}</div>`:`<div class="muted" style="padding:10px 2px 14px">기록 없음</div>`}</div>`;
+  box.innerHTML=`<div class="brief">
+    <div class="uband" style="margin:2px 2px 10px"><b>관내 요약</b><span class="muted">${t.toilets||0}곳 · 최근 ${days}일${state.lastRef?' · 갱신 '+state.lastRef:''}</span>
+      <span class="rbar" style="margin-left:auto;display:flex;gap:6px"><button class="chip sm ${days===7?'on':''}" data-days="7">7일</button><button class="chip sm ${days===28?'on':''}" data-days="28">28일</button><button class="chip sm" data-report>월간 보고서</button><button class="chip sm" data-fold>${open?'접기':'펼치기'}</button></span></div>
+    ${open?`<div class="etiles six">
+      ${tile('화장실', `${t.toilets||0}곳`, `온라인 ${t.online||0} · 오프라인 ${offline}`, offline>0?'warn':'')}
+      ${tile('이용', `${(+(t.uses||t.dispense||0)).toLocaleString()}회`, t.uses?`칸 센서 실측 · 지급 ${t.dispense||0}개`:`지급 기준(칸 센서 없음)`)}
+      ${tile('미처리 민원', `${t.open_complaints||0}건`, `3일 넘은 것 ${t.overdue_complaints||0} · 기간 접수 ${t.complaints||0}`, t.overdue_complaints>0?'bad':(t.open_complaints>0?'warn':''))}
+      ${tile('오늘 청소', `${t.cleaned_today||0}/${t.toilets||0}곳`, `${days}일 동안 ${t.cleanings||0}회`, (t.cleaned_today||0)<(t.toilets||0)?'warn':'')}
+      ${tile('만족도', t.rating!=null?`${(+t.rating).toFixed(1)}점`:'-', `응답 ${t.responses||0}건`, t.rating!=null&&t.rating<3.5?'warn':'')}
+      ${tile('재고 부족', `${t.low_stock||0}곳`, `3일 안 소진 또는 20% 이하`, t.low_stock>0?'warn':'')}
+    </div>
+    <div class="bgrid">
+      <div class="ecard"><div class="eh"><b>조치 필요</b><span class="muted">${acts.length}건 · 화장실 이름을 누르면 상세</span></div>
+        ${acts.length?[3,2,1].map(group).join(''):`<div class="muted" style="padding:14px 2px">조치할 것이 없습니다.</div>`}
+        <div class="bgroup" style="margin-top:14px;border-top:2px solid #EEF1F6;padding-top:8px"><div class="bgh"><b style="color:#22A667">최근 처리</b><span class="muted">${days}일 ${t.actions_done||0}건 · 처리한 항목은 같은 조건이 다시 생길 때까지 목록에서 빠집니다</span><button class="chip sm" data-log style="margin-left:auto">전체 기록</button></div>
+          ${(o.recent_done||[]).length?(o.recent_done||[]).slice(0,5).map(g=>`<div class="brow"><span class="bsev" style="background:#E4F6EC;color:#138A55">${BRIEF_KIND[g.kind]||esc(g.kind)}</span><span class="lnk" data-id="${g.location_id}">${esc(g.name)}</span><span class="bdet">${esc(g.note||g.detail||'')}</span><span class="muted bago" style="min-width:150px">${fmtDt(g.done_at)} ${esc(g.done_by_name||'')}</span></div>`).join(''):`<div class="muted" style="padding:6px 4px;font-size:12px">아직 처리 기록이 없습니다.</div>`}</div></div>
+      <div class="brank">
+        ${rank('이용 많은 곳', rk.busiest||[], r=>`${r.v}회`)}
+        ${rank('민원 많은 곳', rk.complaints||[], r=>`${r.v}건`)}
+        ${rank('만족도 낮은 곳', rk.rating_low||[], r=>`${(+r.v).toFixed(1)}점 <span class="muted" style="font-weight:500">(${r.n}건)</span>`)}
+        ${rank('장시간 재실 발생', rk.long_stay||[], r=>`${r.v}회`)}
+      </div>
+    </div>`:''}
+  </div>`;
+  box.querySelectorAll('.lnk[data-id]').forEach(el=>el.onclick=()=>openDetail(el.dataset.id));
+  box.querySelectorAll('[data-days]').forEach(b=>b.onclick=()=>{ state.briefDays=+b.dataset.days; state.briefMore=false; renderBrief(); });
+  const f=box.querySelector('[data-fold]'); if(f) f.onclick=()=>{ state.briefOpen=!open; try{ localStorage.setItem('briefOpen',String(!open)); }catch{} drawBrief(); };
+  const m=box.querySelector('[data-more]'); if(m) m.onclick=()=>{ state.briefMore=true; drawBrief(); };
+  const rp=box.querySelector('[data-report]'); if(rp) rp.onclick=openReportDialog;
+  box.querySelectorAll('[data-done]').forEach(b=>b.onclick=()=>{ const [loc,kind]=b.dataset.done.split('|'); const a=acts.find(x=>x.location_id===loc&&x.kind===kind); if(a) actionDoneDialog(a); });
+  const lg=box.querySelector('[data-log]'); if(lg) lg.onclick=actionLogDialog;
+}
+// ── 조치 처리 기록(2026-10-23, 사용자 "누가 언제 처리했는지") ──
+// "처리" 를 누르면 fleet_action_done 이 처리자(계정 이름)·시각·메모를 남기고, 띠를 다시 받아 그 항목이 빠진다.
+function actionDoneDialog(a){
+  const bd=modalEl(`<h2 style="margin:0 0 6px">조치 처리</h2>
+    <div class="brow" style="border:0;padding:4px 0 10px"><span class="bsev" style="background:${BRIEF_SEV[a.severity].bg};color:${BRIEF_SEV[a.severity].c}">${BRIEF_KIND[a.kind]||esc(a.kind)}</span><b>${esc(a.name)}</b><span class="muted">${esc(a.detail)}</span></div>
+    ${a.last_done?`<div class="muted" style="font-size:12px;margin-bottom:8px">지난번 처리: ${fmtDt(a.last_done.at)} ${esc(a.last_done.by||'')}${a.last_done.note?` · ${esc(a.last_done.note)}`:''}</div>`:''}
+    <div class="fsec">무엇을 했는지</div>
+    <textarea id="ad_note" rows="3" style="width:100%;box-sizing:border-box" placeholder="예: 업체에 수리 요청, 청소원에게 보충 지시, 현장 확인 결과 이상 없음"></textarea>
+    <div class="muted" style="font-size:12px;margin-top:6px">처리자: ${esc(state.profile.full_name||'')} · 처리 시각은 지금으로 기록됩니다. 같은 조건이 다시 생기면 목록에 다시 올라옵니다.</div>
+    <div id="ad_msg" style="min-height:22px;margin-top:10px;font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn line" data-x>취소</button><button class="btn" data-save>처리함으로 기록</button></div>`);
+  bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  bd.querySelector('[data-save]').onclick=async()=>{ const msg=bd.querySelector('#ad_msg'); const sv=bd.querySelector('[data-save]'); sv.disabled=true; msg.textContent='기록 중…';
+    try{ await rpc('fleet_action_done',{p_location:a.location_id,p_kind:a.kind,p_note:bd.querySelector('#ad_note').value.trim()||null,p_detail:a.detail||null,p_severity:a.severity||null,p_since:a.since||null});
+      markSaved(bd,'#ad_msg',null,'기록되었습니다'); bd.querySelector('[data-x]').textContent='닫기'; renderBrief(); }
+    catch(e){ sv.disabled=false; msg.innerHTML=`<span class="err">기록하지 못했습니다: ${esc(e.message)}</span>`; } };
+}
+async function actionLogDialog(){
+  const bd=modalEl(`<h2 style="margin:0 0 6px">조치 처리 기록</h2><div class="muted" style="font-size:13px;margin-bottom:10px">최근 30일 · 누가 언제 무엇을 처리했는지</div><div id="al_body" class="muted">불러오는 중…</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn line" data-x>닫기</button></div>`,'wide');
+  bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  let list; try{ list=await rpc('fleet_action_log',{p_days:30}); }catch(e){ bd.querySelector('#al_body').innerHTML=`<span class="err">${esc(e.message)}</span>`; return; }
+  bd.querySelector('#al_body').innerHTML=list.length?`<table class="tbl"><thead><tr><th>처리 시각</th><th>처리자</th><th>화장실</th><th>항목</th><th>당시 상태</th><th>메모</th></tr></thead><tbody>
+    ${list.map(g=>`<tr><td class="muted" style="white-space:nowrap">${fmtDt(g.done_at)}</td><td>${esc(g.done_by_name||'-')}</td><td><span class="lnk" data-id="${g.location_id}">${esc(g.name)}</span></td><td><span class="bsev" style="background:${(BRIEF_SEV[g.severity]||BRIEF_SEV[1]).bg};color:${(BRIEF_SEV[g.severity]||BRIEF_SEV[1]).c};border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700">${BRIEF_KIND[g.kind]||esc(g.kind)}</span></td><td class="muted">${esc(g.detail||'')}</td><td>${esc(g.note||'')}</td></tr>`).join('')}</tbody></table>`
+    :'<div class="muted" style="padding:14px 2px">최근 30일에 처리 기록이 없습니다.</div>';
+  bd.querySelectorAll('.lnk[data-id]').forEach(el=>el.onclick=()=>{ bd.remove(); openDetail(el.dataset.id); });
+}
+// ── 월간 보고서(2026-10-23) ──
+// 공무원이 달마다 내는 운영 보고: 그 달 + 지난달 비교 + 화장실별 표 + 눈에 띄는 곳. fleet_report RPC 한 번.
+// 인쇄·PDF 는 새 창(브라우저 인쇄), 엑셀은 xlsx.js 로 두 시트. 숫자는 전부 집계값.
+function openReportDialog(){
+  const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); const def=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const bd=modalEl(`<h2 style="margin:0 0 6px">월간 운영 보고서</h2>
+    <div class="muted" style="font-size:13px;margin-bottom:12px">관내 화장실 전체의 한 달 운영 수치를 지난달과 비교해 보고서로 만듭니다. 인쇄(PDF)와 엑셀 두 가지.</div>
+    <div class="fsec">보고 대상 달</div>
+    <div class="grid2"><div><label class="f">달</label><input id="rp_month" type="month" value="${def}" max="${new Date().toISOString().slice(0,7)}"/></div>
+      <div><label class="f">&nbsp;</label><div class="muted" style="font-size:12px;padding-top:8px">이번 달을 고르면 오늘까지의 중간 집계입니다.</div></div></div>
+    <div id="rp_msg" style="min-height:22px;margin-top:12px;font-size:13px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+      <button class="btn line" data-x>닫기</button><button class="btn line" data-xlsx>엑셀 저장</button><button class="btn" data-print>보고서 열기(인쇄·PDF)</button></div>`);
+  bd.querySelector('[data-x]').onclick=()=>bd.remove();
+  const load=async()=>{ const m=bd.querySelector('#rp_month').value; const msg=bd.querySelector('#rp_msg'); msg.textContent='집계 중…';
+    try{ const r=await rpc('fleet_report',{p_month:m||null}); msg.textContent=''; return r; }catch(e){ msg.innerHTML=`<span class="err">만들지 못했습니다: ${esc(e.message)}</span>`; return null; } };
+  bd.querySelector('[data-print]').onclick=async()=>{ const w=window.open('','_blank'); if(!w){ bd.querySelector('#rp_msg').innerHTML='<span class="err">새 창이 막혔습니다. 팝업 차단을 풀어 주세요.</span>'; return; }
+    const r=await load(); if(!r){ w.close(); return; } w.document.open(); w.document.write(reportHtml(r)); w.document.close(); };
+  bd.querySelector('[data-xlsx]').onclick=async()=>{ const r=await load(); if(r) reportXlsx(r); };
+}
+const RP_ROWS=[ // [제목, 값 뽑기(totals), 단위]
+  ['운영 화장실', t=>t.toilets, '곳'], ['이용(칸 센서 실측)', t=>t.uses, '회'], ['생리용품 지급', t=>t.dispense, '개'], ['지급 실패', t=>t.dispense_failed, '건'],
+  ['민원 접수', t=>t.complaints, '건'], ['민원 처리', t=>t.complaints_done, '건'], ['민원 평균 처리 시간', t=>t.complaint_hours, '시간'],
+  ['청소', t=>t.cleanings, '회'], ['만족도', t=>t.rating==null?null:+(+t.rating).toFixed(2), '점'], ['만족도 응답', t=>t.responses, '건'], ['1~2점 응답', t=>t.responses_low, '건'],
+  ['장시간 재실', t=>t.long_stay, '회'], ['악취 나쁨', t=>t.nh3_bad_min==null?null:Math.round(t.nh3_bad_min/60*10)/10, '시간'], ['쾌적 비율', t=>t.comfort_pct, '%'],
+  ['지급기 고장·실패', t=>t.dispense_faults, '회'], ['문 점검 신호', t=>t.door_fault, '회'], ['보드 재시작', t=>t.board_resets, '회'] ];
+function rpDelta(c,p){ if(c==null||p==null) return ''; const d=+c-+p; if(!d) return '±0'; const pct=+p?` (${d>0?'+':''}${Math.round(100*d/+p)}%)`:''; const v=Number.isInteger(+c)&&Number.isInteger(+p)?Math.round(d):Math.round(d*10)/10; return `${d>0?'+':''}${v}${pct}`; }
+function rpEndDate(to){ const d=new Date(to+'T00:00:00'); d.setDate(d.getDate()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function rpMonthKo(m){ const [y,mm]=m.split('-'); return `${y}년 ${+mm}월`; }
+function rpPrevMonth(m){ const [y,mm]=m.split('-').map(Number); const d=new Date(y,mm-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function reportHtml(r){
+  const c=r.cur||{}, t=c.totals||{}, pt=(r.prev||{}).totals||{}, L=c.locations||[], PL=new Map(((r.prev||{}).locations||[]).map(x=>[x.id,x])), rk=c.rankings||{};
+  const orgs=(r.org_names||[]).filter(Boolean).join(', ')||'관내';
+  const useBasis=t.uses>0;
+  const fmt=v=>v==null?'-':(typeof v==='number'?v.toLocaleString():v);
+  const sumRows=RP_ROWS.filter(([n])=>useBasis||n!=='이용(칸 센서 실측)').map(([n,f,u])=>{ const cv=f(t), pv=f(pt); return `<tr><td>${n}</td><td class="n">${fmt(cv)}${cv==null?'':u}</td><td class="n">${fmt(pv)}${pv==null?'':u}</td><td class="n">${rpDelta(cv,pv)}</td></tr>`; }).join('');
+  const locRows=L.map((l,i)=>{ const p=PL.get(l.id)||{}; const cur=useBasis?l.uses:l.dispense, prev=useBasis?p.uses:p.dispense;
+    return `<tr><td class="n">${i+1}</td><td>${esc(l.name)}<div class="s">${esc(l.code)}</div></td><td class="n">${fmt(cur)}<div class="s">${rpDelta(cur,prev)}</div></td>${useBasis?`<td class="n">${fmt(l.dispense)}</td>`:''}
+      <td class="n">${fmt(l.complaints)} / ${fmt(l.complaints_done)}</td><td class="n">${fmt(l.cleanings)}<div class="s">${fmt(l.cleaning_days)}일</div></td>
+      <td class="n">${l.rating==null?'-':(+l.rating).toFixed(1)}<div class="s">${fmt(l.responses)}건</div></td><td class="n">${fmt(l.long_stay)}</td>
+      <td class="n">${l.nh3_bad_min==null?'-':Math.round(l.nh3_bad_min/6)/10}</td><td class="n">${l.comfort_pct==null?'-':l.comfort_pct+'%'}</td>
+      <td class="n">${(l.dispense_faults||0)+(l.door_fault||0)+(l.board_resets||0)}</td></tr>`; }).join('');
+  const top=(title,items,f)=>`<div class="rk"><b>${title}</b>${items.length?`<ol>${items.map(x=>`<li>${esc(x.name)} <span>${f(x)}</span></li>`).join('')}</ol>`:'<div class="s">해당 없음</div>'}</div>`;
+  const gen=new Date(r.generated_at||Date.now());
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(orgs)} 공중화장실 운영 보고서 ${esc(rpMonthKo(r.month))}</title>
+  <style>
+    body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;color:#1B2540;background:#EEF1F6;font-size:12px}
+    .bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #DDE3EE;padding:10px 16px;display:flex;gap:10px;align-items:center;font-size:14px}
+    .bar button{border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;background:#4353E0;color:#fff}
+    .page{width:190mm;margin:8mm auto;background:#fff;padding:12mm 14mm;box-sizing:border-box;min-height:277mm}
+    h1{font-size:20px;margin:0 0 4px} .sub{color:#4A5468;font-size:12px;margin-bottom:14px} .sub b{color:#1B2540}
+    h2{font-size:14px;margin:18px 0 8px;padding-left:8px;border-left:4px solid #2A78D6}
+    table{width:100%;border-collapse:collapse;font-size:11.5px} th,td{border:1px solid #D6DCEC;padding:5px 7px;vertical-align:top} th{background:#F3F6FB;font-weight:700;text-align:left}
+    td.n,th.n{text-align:right;font-variant-numeric:tabular-nums} th{white-space:nowrap} .s{color:#6B7590;font-size:10px;font-weight:500}
+    .rks{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px} .rk b{display:block;margin-bottom:3px} .rk ol{margin:0;padding-left:18px} .rk li span{color:#4A5468;float:right}
+    .note{color:#4A5468;font-size:10.5px;line-height:1.5;margin-top:14px;border-top:1px solid #E5E9F2;padding-top:8px}
+    .warn{display:inline-block;background:#FCEFD6;color:#B5730A;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px}
+    @page{size:A4;margin:0} @media print{.bar{display:none} body{background:#fff} .page{margin:0;width:auto;min-height:auto}}
+  </style></head><body>
+  <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpMonthKo(r.month))} · 화장실 ${t.toilets||0}곳</span></div>
+  <div class="page">
+    <h1>${esc(orgs)} 공중화장실 운영 월간 보고서</h1>
+    <div class="sub"><b>${esc(rpMonthKo(r.month))}</b> (${esc(r.from)} ~ ${esc(rpEndDate(r.to))})${r.partial?'<span class="warn">진행 중인 달 — 오늘까지 중간 집계</span>':''} · 비교: ${esc(rpMonthKo(rpPrevMonth(r.month)))} · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()} · 케어ON 운영 콘솔 자동 생성</div>
+    <h2>1. 한 달 요약</h2>
+    <table><thead><tr><th>항목</th><th class="n">${esc(rpMonthKo(r.month))}</th><th class="n">지난달</th><th class="n">증감</th></tr></thead><tbody>${sumRows}</tbody></table>
+    <h2>2. 화장실별 현황</h2>
+    <table><thead><tr><th class="n">#</th><th>화장실</th><th class="n">${useBasis?'이용(회)':'지급(개)'}<div class="s">지난달 대비</div></th>${useBasis?'<th class="n">지급(개)</th>':''}<th class="n">민원<div class="s">접수/처리</div></th><th class="n">청소(회)<div class="s">청소한 날</div></th><th class="n">만족도<div class="s">응답</div></th><th class="n">장시간<div class="s">재실</div></th><th class="n">악취<div class="s">나쁨 시간</div></th><th class="n">쾌적<div class="s">비율</div></th><th class="n">기기<div class="s">장애</div></th></tr></thead>
+      <tbody>${locRows||'<tr><td colspan="11">화장실이 없습니다.</td></tr>'}</tbody></table>
+    <h2>3. 눈에 띄는 곳</h2>
+    <div class="rks">
+      ${top(useBasis?'이용 많은 곳':'지급 많은 곳', rk.busiest||[], x=>`${x.v}${useBasis?'회':'개'}`)}
+      ${top('민원 많은 곳', rk.complaints||[], x=>`${x.v}건`)}
+      ${top('만족도 낮은 곳(응답 3건 이상)', rk.rating_low||[], x=>`${(+x.v).toFixed(1)}점 · ${x.n}건`)}
+      ${top('장시간 재실 발생', rk.long_stay||[], x=>`${x.v}회`)}
+    </div>
+    <h2>4. 조치 처리 기록 <span class="s" style="font-weight:400">${(r.actions_done||[]).length}건</span></h2>
+    ${(r.actions_done||[]).length?`<table><thead><tr><th>일시</th><th>화장실</th><th>항목</th><th>당시 상태</th><th>처리자</th><th>메모</th></tr></thead><tbody>
+      ${(r.actions_done||[]).map(g=>`<tr><td style="white-space:nowrap">${fmtDt(g.done_at)}</td><td>${esc(g.name)}</td><td>${BRIEF_KIND[g.kind]||esc(g.kind)}</td><td>${esc(g.detail||'')}</td><td>${esc(g.done_by_name||'')}</td><td>${esc(g.note||'')}</td></tr>`).join('')}</tbody></table>`
+      :'<div class="s">이 달에 처리 기록이 없습니다.</div>'}
+    <div class="note">기준 — 이용: 칸 문 센서가 있는 곳은 문이 닫혔다 열린 사이클(20초 미만 제외)을 센 실측, 없는 곳은 생리용품 지급 수로 대신함. 민원 평균 처리 시간: 접수부터 처리 완료까지. 청소: 키오스크 청소 기록. 만족도: 키오스크 5점 응답. 장시간 재실: 한 칸이 30분 넘게 닫혀 있던 경우. 악취 나쁨: 암모니아 1.0 ppm 이상이었던 시간. 쾌적 비율: 온도 14~29°C·습도 70% 이하·암모니아 0.5 ppm 미만·PM2.5 35 이하를 모두 만족한 측정의 비율. 기기 장애: 지급기 고장·실패, 문 점검 신호, 보드 재시작의 합. 모든 수치는 집계값이며 개인정보를 담지 않습니다.</div>
+  </div></body></html>`;
+}
+function reportXlsx(r){
+  const c=r.cur||{}, t=c.totals||{}, pt=(r.prev||{}).totals||{}, L=c.locations||[], PL=new Map(((r.prev||{}).locations||[]).map(x=>[x.id,x]));
+  const useBasis=t.uses>0;
+  const wb=XLSX.utils.book_new();
+  const sum=[['항목',rpMonthKo(r.month),'지난달','증감'],...RP_ROWS.filter(([n])=>useBasis||n!=='이용(칸 센서 실측)').map(([n,f,u])=>{ const cv=f(t), pv=f(pt); return [n+(u?`(${u})`:''), cv==null?'':cv, pv==null?'':pv, rpDelta(cv,pv)]; })];
+  const ws1=XLSX.utils.aoa_to_sheet(sum); ws1['!cols']=[{wch:22},{wch:14},{wch:14},{wch:14}]; XLSX.utils.book_append_sheet(wb,ws1,'요약');
+  const rows=[['코드','화장실','소속','이용(회)','지난달 이용','지급(개)','지급 실패','민원 접수','민원 처리','평균 처리 시간(h)','청소(회)','청소한 날','만족도','응답','1~2점','장시간 재실','문 점검','지급기 고장','보드 재시작','악취 나쁨(분)','쾌적 비율(%)','체류 중앙값(초)','현재 재고','재고 상한','미처리 민원'],
+    ...L.map(l=>{ const p=PL.get(l.id)||{}; return [l.code,l.name,l.org_name,l.uses,p.uses??'',l.dispense,l.dispense_failed,l.complaints,l.complaints_done,l.complaint_hours??'',l.cleanings,l.cleaning_days,l.rating??'',l.responses,l.responses_low,l.long_stay,l.door_fault,l.dispense_faults,l.board_resets,l.nh3_bad_min,l.comfort_pct??'',l.dwell_med_sec??'',l.pad_qty??'',l.pad_cap??'',l.open_complaints]; })];
+  const ws2=XLSX.utils.aoa_to_sheet(rows); ws2['!cols']=[{wch:10},{wch:24},{wch:12},...Array(22).fill({wch:11})]; XLSX.utils.book_append_sheet(wb,ws2,'화장실별');
+  XLSX.writeFile(wb,`공중화장실_운영보고서_${r.month}.xlsx`);
+}
 function renderStats(){
   const L=state.locs.filter(l=>!l.deleted);
   const off=L.filter(l=>!l.online).length, low=L.filter(l=>l.pad_qty!=null&&l.pad_qty<=10).length;
