@@ -2090,10 +2090,19 @@ async function renderDataAdmin(){
   if(!state.locs||!state.locs.length){ try{ state.locs=await rpc('fleet_locations'); }catch(e){} }
   const limitMB=500, usedMB=u.db_bytes/1e6, pct=Math.min(100,Math.round(100*usedMB/limitMB));
   const tables=(u.tables||[]).slice().sort((a,b)=>b.bytes-a.bytes);
+  // 크기 내역(10-23 밤): 지운 행은 '죽은 행'으로 남아 자동 정리 전까지 자리를 차지하고, 정리 뒤에도 파일은 안 줄어든다(재사용만).
+  // 파일이 실제로 줄어드는 길은 빈 월 파티션 떨어뜨리기(즉시) 또는 VACUUM FULL(SQL Editor). 그래서 데이터·색인·죽은 행을 나눠 보여 준다.
+  const monthKo=m=>`${m.slice(0,4)}년 ${+m.slice(4)}월`;
+  const partsHtml=t=>{ const ps=t.parts||[]; if(!ps.length) return ''; const empties=ps.filter(x=>+x.rows===0&&!x.current);
+    return `<tr class="prow"><td colspan="6" style="padding:4px 12px 12px 28px;background:#FAFBFE">
+      <div class="muted" style="font-size:12px;margin-bottom:4px">월 파티션 — 달마다 파일이 따로라, 빈 달은 떨어뜨리면 그 자리가 바로 돌아옵니다${empties.length?` <button class="chip sm" data-dropparts style="margin-left:8px">빈 파티션 ${empties.length}개 떨어뜨리기</button>`:''}</div>
+      <table style="min-width:0;font-size:12.5px"><thead><tr><th>달</th><th class="n">건수</th><th class="n">크기</th><th class="n">죽은 행</th><th></th></tr></thead><tbody>
+      ${ps.map(x=>`<tr><td>${monthKo(x.month)}${x.current?' <span class="muted">(이번 달)</span>':''}</td><td class="n">${(+x.rows).toLocaleString()}</td><td class="n">${fmtBytes(x.bytes)}</td><td class="n muted">${(+x.dead).toLocaleString()}</td><td class="muted">${+x.rows===0&&!x.current?'비어 있음 — 떨어뜨릴 수 있음':''}</td></tr>`).join('')}</tbody></table></td></tr>`; };
   const rowHtml=t=>`<tr><td><b>${esc(t.label)}</b><div class="muted" style="font-size:11px">${esc(t.target)}</div></td>
-      <td class="n">${(+t.rows).toLocaleString()}</td><td class="n">${fmtBytes(t.bytes)}</td>
+      <td class="n">${(+t.rows).toLocaleString()}</td>
+      <td class="n"><b>${fmtBytes(t.bytes)}</b><div class="muted" style="font-size:11px;font-weight:400">데이터 ${fmtBytes(t.heap_bytes)} · 색인 ${fmtBytes(t.index_bytes)}${+t.dead_rows>0?` · <span style="color:#B5730A">죽은 행 ${(+t.dead_rows).toLocaleString()}건</span>`:''}</div></td>
       <td class="muted">${t.oldest?fmtDate(t.oldest):'-'}</td><td class="muted">${t.newest?fmtDate(t.newest):'-'}</td>
-      <td>${t.rows>0?`<button class="btn sm line" data-purge="${esc(t.target)}">기간 삭제…</button>`:''}</td></tr>`;
+      <td>${t.rows>0?`<button class="btn sm line" data-purge="${esc(t.target)}">기간 삭제…</button>`:''}</td></tr>${partsHtml(t)}`;
   body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <h2 style="margin:0">데이터 관리 <span class="muted" style="font-weight:400;font-size:14px">플랫폼 관리자</span></h2>
       <div style="display:flex;gap:8px"><button class="btn line sm" id="reload">새로고침</button><button class="btn line sm" id="back">← 목록</button></div></div>
@@ -2101,21 +2110,23 @@ async function renderDataAdmin(){
       <div class="etile ${pct>=80?'bad':(pct>=60?'warn':'')}"><div class="l">DB 전체 크기</div><div class="v">${usedMB.toFixed(0)} MB</div><div class="s">무료 플랜 한도 ${limitMB} MB 의 ${pct}% · 표·색인·파티션 포함</div></div>
       <div class="etile ${u.virtual_env_rows>0?'warn':''}"><div class="l">가짜 환경값</div><div class="v">${(+u.virtual_env_rows).toLocaleString()}건</div><div class="s">기기가 없는 화장실의 측정값(10-22 까지 1분 cron 이 만든 것) — 전부 지워도 됨</div></div>
       <div class="etile"><div class="l">환경값 보관 기간</div><div class="v">${u.env_retention_months}개월</div><div class="s">지난 달 파티션을 통째로 삭제 · ⚙ 설정 → 수집 에서 변경(보고서는 최대 92일만 봄)</div></div>
-      <div class="etile"><div class="l">기준 시각</div><div class="v" style="font-size:18px">${fmtDt(u.at)}</div><div class="s">지운 뒤 크기는 자동 정리(vacuum)가 돈 뒤에 줄어듭니다</div></div>
+      <div class="etile"><div class="l">기준 시각</div><div class="v" style="font-size:18px">${fmtDt(u.at)}</div><div class="s">지운 행은 '죽은 행'으로 남습니다. 파일을 바로 줄이려면 빈 파티션을 떨어뜨리거나 SQL Editor 에서 <code>vacuum full env_readings;</code></div></div>
     </div>
     <div class="uband"><b>지울 수 있는 표</b><span class="muted">시각 열이 있는 기록 표만. 화장실·기관·설정·계정 표는 여기 없음</span></div>
     <div class="tcard"><div class="tscroll"><table>
-      <thead><tr><th>표</th><th class="n">건수</th><th class="n">크기</th><th>가장 오래된</th><th>가장 최근</th><th></th></tr></thead>
+      <thead><tr><th>표</th><th class="n">건수</th><th class="n">크기 <span class="muted" style="font-weight:400">(데이터·색인·죽은 행)</span></th><th>가장 오래된</th><th>가장 최근</th><th></th></tr></thead>
       <tbody>${tables.map(rowHtml).join('')}</tbody></table></div></div>
     <div class="uband" style="margin-top:18px"><b>그 밖의 표</b><span class="muted">크기만 · 삭제 대상 아님</span></div>
     <div class="tcard" style="padding:10px 16px"><div class="muted" style="font-size:13px;line-height:1.9">${(u.other||[]).map(o=>`${esc(o.name)} <b>${fmtBytes(o.bytes)}</b>`).join(' · ')||'-'}</div></div>
     <div class="uband" style="margin-top:18px"><b>삭제 기록</b><span class="muted">최근 20건 · 누가 언제 무엇을 몇 건</span></div>
     <div class="tcard"><div class="tscroll"><table>
       <thead><tr><th>시각</th><th>처리자</th><th>표</th><th>범위</th><th>기준 시각(이전 것 삭제)</th><th class="n">삭제 건수</th></tr></thead>
-      <tbody>${logs.length?logs.map(g=>`<tr><td class="muted">${fmtDt(g.executed_at)}</td><td>${esc(g.executed_by_name||'-')}</td><td>${esc((tables.find(t=>t.target===g.target)||{}).label||g.target)}</td><td>${DATA_SCOPE[g.scope]||esc(g.scope)}${g.location_id?` · ${esc((state.locs.find(l=>l.id===g.location_id)||{}).name||g.location_id.slice(0,8))}`:''}</td><td class="muted">${fmtDt(g.before_at)}</td><td class="n"><b>${(+g.deleted).toLocaleString()}</b></td></tr>`).join(''):'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">아직 삭제 기록이 없습니다.</td></tr>'}</tbody></table></div></div>`;
+      <tbody>${logs.length?logs.map(g=>`<tr><td class="muted">${fmtDt(g.executed_at)}</td><td>${esc(g.executed_by_name||'-')}</td><td>${esc((tables.find(t=>t.target===g.target)||{}).label||g.target)}</td><td>${g.scope&&g.scope.startsWith('partition:')?'파티션 떨어뜨림 '+esc(g.scope.slice(10)):(DATA_SCOPE[g.scope]||esc(g.scope))}${g.location_id?` · ${esc((state.locs.find(l=>l.id===g.location_id)||{}).name||g.location_id.slice(0,8))}`:''}</td><td class="muted">${fmtDt(g.before_at)}</td><td class="n"><b>${(+g.deleted).toLocaleString()}</b></td></tr>`).join(''):'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">아직 삭제 기록이 없습니다.</td></tr>'}</tbody></table></div></div>`;
   body.querySelector('#back').onclick=renderDashboard;
   body.querySelector('#reload').onclick=renderDataAdmin;
   body.querySelectorAll('[data-purge]').forEach(b=>b.onclick=()=>purgeDialog(tables, b.dataset.purge));
+  const dp=body.querySelector('[data-dropparts]'); if(dp) dp.onclick=async()=>{ if(!confirm('비어 있는 지난 달 파티션을 떨어뜨립니다. 건수 0 인 달만 대상이라 데이터 손실은 없습니다. 계속할까요?')) return;
+    dp.disabled=true; try{ const r=await rpc('admin_drop_empty_env_partitions'); alert(`떨어뜨림: ${(r.dropped||[]).map(n=>monthKo(n.slice(-6))).join(', ')||'없음'}`); renderDataAdmin(); }catch(e){ alert('실패: '+e.message); dp.disabled=false; } };
 }
 function purgeDialog(tables, target){
   const today=rpIso(new Date());
