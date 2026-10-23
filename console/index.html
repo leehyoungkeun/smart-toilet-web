@@ -602,6 +602,7 @@ function reportHtml(r){
     /* 바닥글: 문서 전체를 표 하나로 감싸고 tfoot 에 두면 크로미엄이 쪽마다 반복해 찍는다(position:fixed 는 헤드리스 인쇄에서 2쪽 머리에 겹침, 10-23 확인) */
     table.sheet{width:100%;border-collapse:collapse} table.sheet>tbody>tr>td,table.sheet>tfoot>tr>td{border:0;padding:0}
     table.sheet>tfoot{display:table-footer-group} .foot{display:none;font-size:9.5px;color:#6B7590;justify-content:space-between;padding-top:6px;border-top:1px solid #E5E9F2;margin-top:8px}
+    table.sheet>thead{display:table-header-group} .head{display:none;font-size:9.5px;color:#6B7590;justify-content:space-between;padding-bottom:5px;border-bottom:1px solid #E5E9F2;margin-bottom:10px}
     h1{font-size:20px;margin:0 0 4px} .sub{color:#4A5468;font-size:12px;margin-bottom:14px} .sub b{color:#1B2540}
     h2{font-size:14px;margin:18px 0 8px;padding-left:8px;border-left:4px solid #2A78D6}
     table{width:100%;border-collapse:collapse;font-size:11.5px} th,td{border:1px solid #D6DCEC;padding:5px 7px;vertical-align:top} th{background:#F3F6FB;font-weight:700;text-align:left}
@@ -609,12 +610,12 @@ function reportHtml(r){
     .rks{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px} .rk b{display:block;margin-bottom:3px} .rk ol{margin:0;padding-left:18px} .rk li span{color:#4A5468;float:right}
     .note{color:#4A5468;font-size:10.5px;line-height:1.5;margin-top:14px;border-top:1px solid #E5E9F2;padding-top:8px}
     .warn{display:inline-block;background:#FCEFD6;color:#B5730A;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px}
-    @page{size:A4 portrait;margin:14mm 14mm 18mm}
+    @page{size:A4 portrait;margin:16mm 14mm 18mm}
     @media print{.bar{display:none} body{background:#fff} .page{margin:0;width:auto;padding:0;min-height:auto}
-      .foot{display:flex}}
+      .foot{display:flex} .head{display:flex}}
   </style></head><body>
   <div class="bar"><button onclick="print()">인쇄 / PDF 저장</button><span>${esc(orgs)} · ${esc(rpTitle(r))} · 화장실 ${t.toilets||0}곳</span><span class="tip">A4 세로 · 인쇄 창에서 "대상: PDF 로 저장" 을 고르면 파일로 저장됩니다</span></div>
-  <div class="page"><table class="sheet"><tfoot><tr><td><div class="foot"><span>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서 · ${esc(rpTitle(r))}</span><span>케어ON 운영 콘솔 · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()}</span></div></td></tr></tfoot><tbody><tr><td>
+  <div class="page"><table class="sheet"><thead><tr><td><div class="head"><span>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서</span><span>${esc(rpTitle(r))}</span></div></td></tr></thead><tfoot><tr><td><div class="foot"><span>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서 · ${esc(rpTitle(r))}</span><span>케어ON 운영 콘솔 · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()}</span></div></td></tr></tfoot><tbody><tr><td>
     <h1>${esc(orgs)} 공중화장실 운영 ${kindKo} 보고서</h1>
     <div class="sub"><b>${esc(rpTitle(r))}</b> (${esc(r.from)} ~ ${esc(r.to_incl)})${r.partial?'<span class="warn">오늘 포함 — 중간 집계</span>':''} · 비교: 직전 ${r.days}일(${esc(prevLabel)}) · 작성 ${gen.getFullYear()}.${gen.getMonth()+1}.${gen.getDate()} · 케어ON 운영 콘솔 자동 생성</div>
     <h2>1. 요약</h2>
