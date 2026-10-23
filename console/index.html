@@ -2150,9 +2150,21 @@ function purgeDialog(tables, target){
     catch(e){ msg.innerHTML=`<span class="err">${esc(e.message)}</span>`; } };
   delBtn.onclick=async()=>{ if(!checked||checked.params!==JSON.stringify(params())){ msg.innerHTML='<span class="err">조건이 바뀌었습니다. 건수를 다시 확인하세요.</span>'; reset(); return; }
     if(!confirm(`${(+checked.count).toLocaleString()}건을 지웁니다. 되돌릴 수 없습니다. 계속할까요?`)) return;
-    delBtn.disabled=true; msg.textContent='지우는 중…';
-    try{ const r=await rpc('admin_db_purge',{...params(),p_dry_run:false}); msg.innerHTML=`<span class="ok" style="font-weight:700">✓ ${(+r.deleted).toLocaleString()}건 삭제했습니다.</span> <span class="muted">크기는 자동 정리 뒤 줄어듭니다.</span>`; reset(); bd.querySelector('[data-x]').textContent='닫기'; bd.querySelector('[data-x]').onclick=()=>{ bd.remove(); renderDataAdmin(); }; }
-    catch(e){ msg.innerHTML=`<span class="err">${esc(e.message)}</span>`; } };
+    // 한 번에 2만 건씩 나눠 지운다(Supabase API 한 번 8초 제한 — 52만 건을 한 번에 지우다 타임아웃, 10-23). 남은 것이 0 이 될 때까지 반복.
+    delBtn.disabled=true; bd.querySelector('[data-count]').disabled=true; bd.querySelectorAll('select,input').forEach(el=>el.disabled=true);
+    const total=+checked.count; let done=0, logId=null, stop=false;
+    bd.querySelector('[data-x]').textContent='중단'; bd.querySelector('[data-x]').onclick=()=>{ stop=true; };
+    try{
+      while(!stop){
+        msg.innerHTML=`지우는 중… <b>${done.toLocaleString()}</b> / ${total.toLocaleString()}건 <span class="muted">(${Math.min(100,Math.round(100*done/Math.max(1,total)))}%)</span>`;
+        const r=await rpc('admin_db_purge',{...params(),p_dry_run:false,p_batch:20000,p_log_id:logId});
+        logId=r.log_id; done+=(+r.deleted||0);
+        if(!r.remaining||!r.deleted) break;
+      }
+      msg.innerHTML=`<span class="ok" style="font-weight:700">✓ ${done.toLocaleString()}건 삭제했습니다${stop?' (중단함)':''}.</span> <span class="muted">크기는 자동 정리(vacuum) 뒤 줄어듭니다.</span>`;
+    }catch(e){ msg.innerHTML=`<span class="err">${esc(e.message)}</span> <span class="muted">지금까지 ${done.toLocaleString()}건 삭제됨 · 다시 "건수 확인" 뒤 이어서 지울 수 있습니다.</span>`; }
+    reset(); bd.querySelector('[data-count]').disabled=false; bd.querySelectorAll('select,input').forEach(el=>el.disabled=false);
+    bd.querySelector('[data-x]').textContent='닫기'; bd.querySelector('[data-x]').onclick=()=>{ bd.remove(); renderDataAdmin(); }; };
 }
 async function renderOperators(){
   mountShell();
